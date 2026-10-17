@@ -2,13 +2,14 @@
 
 import { useActionState, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload } from "lucide-react";
+import { PenLine, Upload } from "lucide-react";
 import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { notifyChange } from "@/components/realtime";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { fileExtension, formatBytes, type ActionState } from "@/lib/utils";
 import { addComment, addDocumentVersion } from "../actions";
+import { makeDocumentEditable } from "../live-actions";
 
 export function VersionUploader({
   documentId,
@@ -61,6 +62,39 @@ export function VersionUploader({
         <Upload className="h-3.5 w-3.5" />
         {progress !== null ? `업로드 중… ${Math.round(progress)}%` : "새 버전 업로드"}
       </button>
+    </div>
+  );
+}
+
+/** 업로드한 Word·텍스트 파일 → 앱에서 함께 편집하는 실시간 문서로 전환 */
+export function MakeEditableButton({ documentId, fileName }: { documentId: string; fileName: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run() {
+    const ok = window.confirm(
+      `「${fileName}」을(를) 팀원과 함께 편집하는 실시간 문서로 엽니다.\n\n· 원본 파일은 그대로 보관되어 언제든 내려받을 수 있습니다.\n· 편집한 내용은 「Word로 내보내기」로 .docx 로 받을 수 있습니다.\n· 머리글·각주 같은 복잡한 서식은 단순화될 수 있습니다.\n\n계속할까요?`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    const result = await makeDocumentEditable(documentId);
+    if (result.error) {
+      setBusy(false);
+      return setError(result.error);
+    }
+    notifyChange("documents");
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button type="button" onClick={run} disabled={busy} className="btn-primary">
+        <PenLine className="h-4 w-4" />
+        {busy ? "편집 문서로 여는 중…" : "편집하기"}
+      </button>
+      {error && <p className="max-w-xs text-right text-xs text-red-600">{error}</p>}
     </div>
   );
 }

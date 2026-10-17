@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui";
 import { notifyChange, useRealtime } from "@/components/realtime";
+import { EMPTY_PRESENCE } from "@/lib/presence";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { cn } from "@/lib/utils";
 import { createAsset, createSnapshot, getSnapshotContent, saveLiveContent } from "../live-actions";
@@ -506,7 +507,7 @@ export function LiveEditor(props: Props) {
   }
   const { roomId, ...rest } = props;
   return (
-    <RoomProvider id={roomId} initialPresence={{ page: null }}>
+    <RoomProvider id={roomId} initialPresence={EMPTY_PRESENCE}>
       <ClientSideSuspense fallback={<EditorLoading />}>
         <CollaborativeEditor {...rest} />
       </ClientSideSuspense>

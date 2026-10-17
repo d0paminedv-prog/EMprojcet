@@ -7,17 +7,19 @@ import { Download, ExternalLink, MessageSquare, Pencil, Trash2 } from "lucide-re
 import { db } from "@/db";
 import { comments, documentSnapshots, documents, documentVersions, members, projects, type DocumentVersion } from "@/db/schema";
 import { ConfirmButton } from "@/components/form-controls";
+import { HereNow } from "@/components/realtime";
 import { DocIcon } from "@/components/lists";
 import { Avatar, Badge, Card, Dot, Notice } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { DOC_CATEGORIES, optionLabel } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/dates";
-import { previewKind } from "@/lib/mime";
+import { decodeText } from "@/lib/convert";
+import { isEditableFile, previewKind } from "@/lib/mime";
 import { projectOptions } from "@/lib/queries";
 import { readFileBuffer, storageClientConfig } from "@/lib/storage";
 import { figmaEmbedUrl, formatBytes, isUuid } from "@/lib/utils";
 import { deleteComment, deleteDocument, updateDocument } from "../actions";
-import { CommentForm, DocumentEditForm, VersionUploader } from "./doc-client";
+import { CommentForm, DocumentEditForm, MakeEditableButton, VersionUploader } from "./doc-client";
 import { LiveEditor } from "./live-editor";
 import { after } from "next/server";
 import { docRoomId } from "@/lib/liveblocks";
@@ -64,7 +66,7 @@ async function DocxPreview({ version }: { version: DocumentVersion }) {
 async function TextPreview({ version }: { version: DocumentVersion }) {
   const buffer = await readFileBuffer(version.storage, version.storageKey);
   if (!buffer) return <Notice tone="error">파일을 불러오지 못했습니다.</Notice>;
-  const text = buffer.subarray(0, 300_000).toString("utf8");
+  const text = decodeText(buffer.subarray(0, 300_000));
   return <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800">{text}</pre>;
 }
 
@@ -206,6 +208,12 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
               {row.createdByName ?? "알 수 없음"} 작성
               {doc.lastEditedAt && ` · ${editor?.name ?? "알 수 없음"} ${formatRelative(doc.lastEditedAt)} 편집`}
             </span>
+            {latest && (
+              <a href={`/api/files/${latest.id}?download=1`} className="inline-flex items-center gap-1 text-brand-600 hover:underline" title="편집 문서로 열기 전 업로드한 원본 파일">
+                <Download className="h-3 w-3" />
+                원본 파일 {latest.fileName}
+              </a>
+            )}
           </div>
           {doc.description && <p className="mt-2 text-sm text-gray-600">{doc.description}</p>}
         </div>
@@ -241,6 +249,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
             <span>
               {row.createdByName ?? "알 수 없음"} 등록 · {formatRelative(doc.updatedAt)} 수정
             </span>
+            <HereNow />
           </div>
           {doc.description && <p className="mt-3 whitespace-pre-wrap text-sm text-gray-700">{doc.description}</p>}
           {doc.kind === "figma" && (
@@ -253,9 +262,10 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
             </p>
           )}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-start gap-2">
+          {doc.kind === "file" && latest && isEditableFile(latest.fileName) && <MakeEditableButton documentId={doc.id} fileName={latest.fileName} />}
           {latest && (
-            <a href={`/api/files/${latest.id}?download=1`} className="btn-primary">
+            <a href={`/api/files/${latest.id}?download=1`} className={doc.kind === "file" && isEditableFile(latest.fileName) ? "btn-secondary" : "btn-primary"}>
               <Download className="h-4 w-4" />
               다운로드
             </a>

@@ -46,3 +46,10 @@ export function previewKind(name: string): PreviewKind {
   if (ext === "docx") return "docx";
   return "none";
 }
+
+/** 실시간 문서로 바꿔서 앱 안에서 편집할 수 있는 업로드 형식 */
+export const EDITABLE_EXTENSIONS = ["docx", "txt", "md"];
+
+export function isEditableFile(name: string): boolean {
+  return EDITABLE_EXTENSIONS.includes(fileExtension(name));
+}
