@@ -6,7 +6,7 @@ import { Upload } from "lucide-react";
 import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { notifyChange } from "@/components/realtime";
-import { uploadFile } from "@/lib/upload-client";
+import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { fileExtension, formatBytes, type ActionState } from "@/lib/utils";
 import { addComment, addDocumentVersion } from "../actions";
 
@@ -15,7 +15,7 @@ export function VersionUploader({
   storage,
 }: {
   documentId: string;
-  storage: { mode: "blob" | "local"; access: "private" | "public"; ready: boolean };
+  storage: StorageClientConfig;
 }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -31,7 +31,7 @@ export function VersionUploader({
     setError(null);
     setProgress(0);
     try {
-      const uploaded = await uploadFile(file, storage.mode, storage.access, setProgress);
+      const uploaded = await uploadFile(file, storage, setProgress);
       const result = await addDocumentVersion({ documentId, note, file: uploaded });
       if (result.error) throw new Error(result.error);
       notifyChange("documents");

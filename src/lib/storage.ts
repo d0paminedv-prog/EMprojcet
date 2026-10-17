@@ -4,17 +4,29 @@ import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { del, get, put } from "@vercel/blob";
+import type { StorageClientConfig } from "./upload-client";
 import { fileExtension } from "./utils";
 
 /**
  * 파일 저장소
- * - Vercel 배포: Vercel Blob (BLOB_READ_WRITE_TOKEN 이 있으면 자동 사용)
+ * - Vercel 배포: Vercel Blob (BLOB_STORE_ID 또는 BLOB_READ_WRITE_TOKEN 이 있으면 자동 사용)
  * - 로컬 개발: .data/uploads 폴더
  */
 export type StorageMode = "blob" | "local";
 
+/**
+ * Vercel Blob 인증 방식
+ * - token: BLOB_READ_WRITE_TOKEN (예전 방식)
+ * - oidc : BLOB_STORE_ID + Vercel 자동 인증(OIDC) — 2026년 6월 이후 Blob 을 연결하면 기본값
+ */
+export function blobAuthKind(): "token" | "oidc" | null {
+  if (process.env.BLOB_READ_WRITE_TOKEN) return "token";
+  if (process.env.BLOB_STORE_ID) return "oidc";
+  return null;
+}
+
 export function storageMode(): StorageMode {
-  return process.env.BLOB_READ_WRITE_TOKEN ? "blob" : "local";
+  return blobAuthKind() ? "blob" : "local";
 }
 
 /** 업무 문서이므로 기본은 비공개(private) Blob. 공개 스토어를 쓰는 경우 BLOB_ACCESS=public */
@@ -24,6 +36,11 @@ export function blobAccess(): "private" | "public" {
 
 export function storageReady(): boolean {
   return storageMode() === "blob" || !process.env.VERCEL;
+}
+
+/** 브라우저 업로드 컴포넌트에 넘길 설정 */
+export function storageClientConfig(): StorageClientConfig {
+  return { mode: storageMode(), access: blobAccess(), ready: storageReady(), flow: blobAuthKind() === "token" ? "token" : "presigned" };
 }
 
 const LOCAL_DIR = path.join(process.cwd(), ".data", "uploads");
