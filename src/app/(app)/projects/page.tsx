@@ -3,7 +3,7 @@ import Link from "next/link";
 import { desc, eq, sql } from "drizzle-orm";
 import { CalendarRange, MapPin, Plus } from "lucide-react";
 import { db } from "@/db";
-import { documents, meetings, members, projects } from "@/db/schema";
+import { documents, members, projects, tasks } from "@/db/schema";
 import { Badge, EmptyState, PageHeader } from "@/components/ui";
 import { PROJECT_CATEGORIES, PROJECT_STATUSES, optionColor, optionLabel } from "@/lib/constants";
 import { dDay, formatShortDate, todayKey } from "@/lib/dates";
@@ -18,7 +18,8 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
       project: projects,
       ownerName: members.name,
       docCount: sql<number>`(select count(*)::int from ${documents} where ${documents.projectId} = ${projects.id})`,
-      meetingCount: sql<number>`(select count(*)::int from ${meetings} where ${meetings.projectId} = ${projects.id})`,
+      taskTotal: sql<number>`(select count(*)::int from ${tasks} where ${tasks.projectId} = ${projects.id})`,
+      taskDone: sql<number>`(select count(*)::int from ${tasks} where ${tasks.projectId} = ${projects.id} and ${tasks.status} = 'done')`,
     })
     .from(projects)
     .leftJoin(members, eq(members.id, projects.ownerId))
@@ -64,7 +65,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map(({ project: p, ownerName, docCount, meetingCount }) => (
+          {rows.map(({ project: p, ownerName, docCount, taskTotal, taskDone }) => (
             <Link key={p.id} href={`/projects/${p.id}`} className="card group flex flex-col overflow-hidden transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="h-1.5" style={{ backgroundColor: p.color }} />
               <div className="flex flex-1 flex-col p-4">
@@ -76,7 +77,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
                   <Badge color={optionColor(PROJECT_STATUSES, p.status)}>{optionLabel(PROJECT_STATUSES, p.status)}</Badge>
                 </div>
                 <p className="mt-2 line-clamp-2 min-h-10 text-sm text-gray-600">{p.description || "개요가 없습니다."}</p>
-                <div className="mt-3 space-y-1 text-xs text-gray-500">
+                <div className="mt-auto space-y-1 pt-3 text-xs text-gray-500">
                   <p className="flex items-center gap-1.5">
                     <CalendarRange className="h-3.5 w-3.5" />
                     {p.startDate ? `${formatShortDate(p.startDate)} ~ ${p.endDate ? formatShortDate(p.endDate) : ""}` : "일정 미정"}
@@ -89,10 +90,18 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
                     </p>
                   )}
                 </div>
-                <div className="mt-auto flex items-center justify-between border-t border-gray-100 pt-3 text-xs text-gray-500">
+                <div className="mt-3 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-100">
+                    <div className="h-full rounded-full" style={{ width: `${taskTotal ? Math.round((taskDone / taskTotal) * 100) : 0}%`, backgroundColor: p.color }} />
+                  </div>
+                  <span className="text-[11px] text-gray-500">
+                    태스크 {taskDone}/{taskTotal}
+                  </span>
+                </div>
+                <div className="mt-3 flex items-center justify-between border-t border-gray-100 pt-3 text-xs text-gray-500">
                   <span>{optionLabel(PROJECT_CATEGORIES, p.category)}</span>
                   <span>
-                    문서 {docCount} · 회의록 {meetingCount}
+                    문서 {docCount}
                     {ownerName && ` · PM ${ownerName}`}
                   </span>
                 </div>

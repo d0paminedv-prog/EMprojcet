@@ -47,7 +47,6 @@ function readEventForm(form: FormData): { error: string } | { data: Omit<typeof 
       description: str(form, "description"),
       projectId: isUuid(projectId) ? projectId : null,
       assigneeIds,
-      done: form.get("done") === "on",
     },
   };
 }
@@ -87,18 +86,3 @@ export async function deleteEvent(id: string, form: FormData) {
   revalidatePath("/", "layout");
   redirect(backTo(form, event?.startAt ?? new Date()));
 }
-
-/** 할 일 완료 체크 토글 */
-export async function toggleEventDone(id: string) {
-  const user = await requireUser();
-  if (!isUuid(id)) return;
-  const [event] = await db.select().from(events).where(eq(events.id, id)).limit(1);
-  if (!event) return;
-  await db.update(events).set({ done: !event.done, updatedAt: new Date() }).where(eq(events.id, id));
-  if (!event.done) {
-    await logActivity({ actorId: user.id, verb: "할 일을 완료했습니다", targetType: "event", targetId: event.id, targetTitle: event.title, projectId: event.projectId });
-  }
-  revalidatePath("/", "layout");
-}
-
-

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { EVENT_TYPES, optionLabel } from "@/lib/constants";
-import { listEvents } from "@/lib/data";
+import { listEvents, listTasks } from "@/lib/data";
 import { addDays, toDateKey } from "@/lib/dates";
 
 function escape(text: string): string {
@@ -35,8 +35,21 @@ export async function GET() {
     lines.push(`SUMMARY:${escape(summary)}`);
     if (e.location) lines.push(`LOCATION:${escape(e.location)}`);
     if (e.description) lines.push(`DESCRIPTION:${escape(e.description)}`);
-    if (e.type === "task" && e.done) lines.push("STATUS:COMPLETED");
     lines.push("END:VEVENT");
+  }
+  // 마감일이 있는 미완료 태스크도 종일 항목으로 포함
+  const openTasks = await listTasks({ openOnly: true });
+  for (const t of openTasks) {
+    if (!t.dueDate) continue;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:task-${t.id}@bx-hub`,
+      `DTSTAMP:${now}`,
+      `DTSTART;VALUE=DATE:${t.dueDate.replace(/-/g, "")}`,
+      `DTEND;VALUE=DATE:${addDays(t.dueDate, 1).replace(/-/g, "")}`,
+      `SUMMARY:${escape(`[태스크] ${t.title}${t.assigneeName ? ` - ${t.assigneeName}` : ""}`)}`,
+      "END:VEVENT",
+    );
   }
   lines.push("END:VCALENDAR");
 

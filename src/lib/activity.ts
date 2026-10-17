@@ -4,7 +4,7 @@ import { activities } from "@/db/schema";
 export async function logActivity(input: {
   actorId: string;
   verb: string;
-  targetType: "project" | "document" | "event" | "meeting" | "comment";
+  targetType: "project" | "document" | "event" | "task" | "comment" | "member";
   targetId?: string | null;
   targetTitle?: string;
   projectId?: string | null;
@@ -32,8 +32,8 @@ export function activityHref(targetType: string, targetId: string | null): strin
     case "document":
     case "comment":
       return `/documents/${targetId}`;
-    case "meeting":
-      return `/meetings/${targetId}`;
+    case "task":
+      return `/tasks?task=${targetId}`;
     case "event":
       return `/schedule?event=${targetId}`;
     default:

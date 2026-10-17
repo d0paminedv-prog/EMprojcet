@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Upload } from "lucide-react";
 import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
+import { notifyChange } from "@/components/realtime";
 import { uploadFile } from "@/lib/upload-client";
 import { fileExtension, formatBytes, type ActionState } from "@/lib/utils";
 import { addComment, addDocumentVersion } from "../actions";
@@ -33,6 +34,7 @@ export function VersionUploader({
       const uploaded = await uploadFile(file, storage.mode, storage.access, setProgress);
       const result = await addDocumentVersion({ documentId, note, file: uploaded });
       if (result.error) throw new Error(result.error);
+      notifyChange("documents");
       setFile(null);
       setNote("");
       if (inputRef.current) inputRef.current.value = "";
@@ -99,7 +101,7 @@ export function DocumentEditForm({
         <label className="label">제목</label>
         <input name="title" className="input" defaultValue={doc.title} required />
       </div>
-      {doc.kind !== "file" && (
+      {(doc.kind === "figma" || doc.kind === "link") && (
         <div>
           <label className="label">{doc.kind === "figma" ? "Figma 링크" : "URL"}</label>
           <input name="url" type="url" className="input" defaultValue={doc.url ?? ""} required />

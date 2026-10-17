@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { CalendarArrowDown, ChevronLeft, ChevronRight, NotebookPen, Plus, X } from "lucide-react";
+import { CalendarArrowDown, CheckSquare, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { db } from "@/db";
 import { events } from "@/db/schema";
 import { ConfirmButton } from "@/components/form-controls";
@@ -9,7 +9,7 @@ import { EventList, eventTimeLabel } from "@/components/lists";
 import { TaskList } from "@/components/task-list";
 import { Card, Dot, PageHeader } from "@/components/ui";
 import { EVENT_TYPES, optionColor } from "@/lib/constants";
-import { listEvents, type EventRow } from "@/lib/data";
+import { listEvents, listTasks, type EventRow, type TaskRow } from "@/lib/data";
 import {
   addDays,
   formatDate,
@@ -69,7 +69,6 @@ function toFormValues(e: typeof events.$inferSelect): EventFormValues {
     description: e.description,
     projectId: e.projectId ?? "",
     assigneeIds: e.assigneeIds,
-    done: e.done,
   };
 }
 
@@ -85,13 +84,14 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const to = parseDateKey(addDays(grid[grid.length - 1], 1));
   const today = todayKey();
 
-  const [monthEvents, projects, members, upcoming, openTasks, selected] = await Promise.all([
+  const [monthEvents, projects, members, upcoming, openTasks, selected, monthTasks] = await Promise.all([
     listEvents({ from, to, projectId, memberId }),
     projectOptions(),
     memberOptions(),
     listEvents({ from: parseDateKey(today), to: parseDateKey(addDays(today, 14)), projectId, memberId, limit: 20 }),
-    listEvents({ onlyOpenTasks: true, projectId, memberId, limit: 30 }),
+    listTasks({ openOnly: true, projectId, assigneeId: memberId, dueBefore: addDays(today, 15), limit: 30 }),
     isUuid(sp.event) ? db.select().from(events).where(eq(events.id, sp.event)).limit(1) : Promise.resolve([]),
+    listTasks({ projectId, assigneeId: memberId, dueFrom: grid[0], dueBefore: addDays(grid[41], 1) }),
   ]);
   const selectedEvent = selected[0];
 
@@ -124,9 +124,14 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         description: "",
         projectId: projectId ?? "",
         assigneeIds: [],
-        done: false,
       }
     : null;
+
+  const tasksByDay = new Map<string, TaskRow[]>();
+  for (const t of monthTasks) {
+    if (!t.dueDate) continue;
+    tasksByDay.set(t.dueDate, [...(tasksByDay.get(t.dueDate) ?? []), t]);
+  }
 
   return (
     <div>
@@ -200,6 +205,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
               {grid.map((day, i) => {
                 const inMonth = day.startsWith(monthPrefix);
                 const dayEvents = byDay.get(day) ?? [];
+                const dayTasks = tasksByDay.get(day) ?? [];
                 const isToday = day === today;
                 return (
                   <div
@@ -236,6 +242,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                           <Dot color={e.projectColor ?? optionColor(EVENT_TYPES, e.type)} />
                         </Link>
                       ))}
+                      {dayTasks.length > 0 && <span className="text-[9px] font-semibold text-sky-600">✓{dayTasks.length}</span>}
                     </div>
                     {/* 데스크톱: 일정 칩 */}
                     <div className="mt-1 hidden space-y-0.5 sm:block">
@@ -248,7 +255,6 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                             title={`${e.title} · ${eventTimeLabel(e)}`}
                             className={cn(
                               "flex items-center gap-1 truncate rounded px-1.5 py-0.5 text-[11px] leading-4 hover:brightness-95",
-                              e.done && "line-through opacity-60",
                               sp.event === e.id && "ring-2 ring-gray-900",
                             )}
                             style={{ backgroundColor: `${color}1f`, color }}
@@ -259,6 +265,18 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                         );
                       })}
                       {dayEvents.length > 3 && <p className="px-1 text-[11px] text-gray-500">+{dayEvents.length - 3}건</p>}
+                      {dayTasks.slice(0, 2).map((t) => (
+                        <Link
+                          key={t.id}
+                          href={`/tasks?task=${t.id}`}
+                          title={`태스크 마감: ${t.title} (${t.assigneeName ?? "미배정"})`}
+                          className={cn("flex items-center gap-1 truncate rounded border border-dashed border-sky-300 px-1.5 py-0.5 text-[11px] leading-4 text-sky-700 hover:bg-sky-50", t.status === "done" && "line-through opacity-50")}
+                        >
+                          <CheckSquare className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{t.title}</span>
+                        </Link>
+                      ))}
+                      {dayTasks.length > 2 && <p className="px-1 text-[11px] text-sky-600">태스크 +{dayTasks.length - 2}</p>}
                     </div>
                   </div>
                 );
@@ -273,6 +291,10 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                 {t.label}
               </span>
             ))}
+            <span className="inline-flex items-center gap-1 text-sky-600">
+              <CheckSquare className="h-3 w-3" />
+              태스크 마감
+            </span>
           </div>
 
           {/* 모바일에서는 이번 달 목록을 함께 표시 */}
@@ -297,12 +319,6 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
               )}
               {selectedEvent && (
                 <>
-                  {selectedEvent.meetingId && (
-                    <Link href={`/meetings/${selectedEvent.meetingId}`} className="mb-3 flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-2 text-xs font-medium text-violet-700 hover:bg-violet-100">
-                      <NotebookPen className="h-3.5 w-3.5" />
-                      회의록의 액션 아이템에서 등록된 일정입니다 · 회의록 보기
-                    </Link>
-                  )}
                   <EventForm
                     key={selectedEvent.id}
                     action={updateEvent.bind(null, selectedEvent.id)}
@@ -326,8 +342,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
           <Card title="앞으로 2주" bodyClassName="p-2">
             <EventList events={upcoming} members={members} />
           </Card>
-          <Card title={`남은 할 일 (${openTasks.length})`} bodyClassName="p-2">
-            <TaskList tasks={openTasks} />
+          <Card title={`2주 내 마감 태스크 (${openTasks.length})`} bodyClassName="p-2">
+            <TaskList tasks={openTasks} showAssignee />
           </Card>
         </aside>
       </div>

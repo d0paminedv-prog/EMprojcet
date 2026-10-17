@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, FileText, FolderKanban, LayoutDashboard, NotebookPen, Users } from "lucide-react";
+import { CalendarDays, FileText, FolderKanban, LayoutDashboard, ListChecks, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/", label: "대시보드", icon: LayoutDashboard },
+  { href: "/tasks", label: "태스크", icon: ListChecks },
   { href: "/projects", label: "프로젝트", icon: FolderKanban },
-  { href: "/documents", label: "문서함", icon: FileText },
+  { href: "/documents", label: "문서", icon: FileText },
   { href: "/schedule", label: "일정", icon: CalendarDays },
-  { href: "/meetings", label: "회의록", icon: NotebookPen },
   { href: "/team", label: "팀", icon: Users },
 ];
 

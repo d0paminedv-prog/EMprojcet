@@ -3,11 +3,14 @@ import { CheckCircle2, CircleAlert } from "lucide-react";
 import { databaseUrl } from "@/db";
 import { ConfirmButton } from "@/components/form-controls";
 import { Avatar, Badge, Card, PageHeader } from "@/components/ui";
-import { AI_MODEL, aiConfigured } from "@/lib/ai";
-import { listMembers, requireUser } from "@/lib/auth";
+import { MAX_MEMBERS, entryCode, listMembers, requireUser } from "@/lib/auth";
+import { formatRelative } from "@/lib/dates";
+import { siteOrigin } from "@/lib/site";
+import { figmaConfigured } from "@/lib/figma";
+import { liveblocksConfigured } from "@/lib/liveblocks";
 import { blobAccess, storageMode, storageReady } from "@/lib/storage";
-import { addMember, changePassword, removeMember, resetMemberPassword, updateMember } from "./actions";
-import { AddMemberForm, ChangePasswordForm, MemberEditForm } from "./team-forms";
+import { removeMember, updateMember } from "./actions";
+import { InviteBox, MemberEditForm } from "./team-forms";
 
 export const metadata: Metadata = { title: "팀" };
 
@@ -30,68 +33,53 @@ export default async function TeamPage() {
 
   return (
     <div>
-      <PageHeader title="팀" description="팀원 정보와 로그인, 서비스 연결 상태를 관리합니다." />
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-        <div className="space-y-6">
-          <Card title={`팀원 (${members.length})`}>
-            <ul className="divide-y divide-gray-100">
-              {members.map((m) => (
-                <li key={m.id} className="py-3 first:pt-0 last:pb-0">
-                  <details>
-                    <summary className="flex cursor-pointer list-none items-center gap-3">
-                      <Avatar name={m.name} color={m.color} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-gray-900">{m.name}</span>
-                          {m.id === user.id && <Badge className="bg-brand-50 text-brand-700">나</Badge>}
-                          {!m.passwordHash && <Badge className="bg-amber-50 text-amber-700">첫 로그인 대기</Badge>}
-                        </span>
-                        <span className="block text-xs text-gray-500">{[m.role, m.email].filter(Boolean).join(" · ") || "역할 미입력"}</span>
+      <PageHeader title="팀" description="팀원 정보와 초대, 서비스 연결 상태를 관리합니다." />
+      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+        <Card title={`팀원 (${members.length}/${MAX_MEMBERS})`}>
+          <ul className="divide-y divide-gray-100">
+            {members.map((m) => (
+              <li key={m.id} className="py-3 first:pt-0 last:pb-0">
+                <details>
+                  <summary className="flex cursor-pointer list-none items-center gap-3">
+                    <Avatar name={m.name} color={m.color} />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900">{m.name}</span>
+                        {m.id === user.id && <Badge className="bg-brand-50 text-brand-700">나</Badge>}
                       </span>
-                      <span className="text-xs text-brand-600">편집</span>
-                    </summary>
-                    <MemberEditForm action={updateMember.bind(null, m.id)} member={{ name: m.name, role: m.role, email: m.email, color: m.color }} />
-                    {m.id !== user.id && (
-                      <div className="mt-2 flex flex-wrap justify-end gap-2">
-                        {m.passwordHash && (
-                          <form action={resetMemberPassword.bind(null, m.id)}>
-                            <ConfirmButton message={`${m.name}님의 비밀번호를 초기화할까요? 다음 로그인 때 팀 초대 코드로 새 비밀번호를 만들게 됩니다.`} className="btn-secondary btn-sm">
-                              비밀번호 초기화
-                            </ConfirmButton>
-                          </form>
-                        )}
-                        <form action={removeMember.bind(null, m.id)}>
-                          <ConfirmButton message={`${m.name}님을 팀에서 삭제할까요? 작성한 문서·회의록은 유지됩니다.`}>삭제</ConfirmButton>
-                        </form>
-                      </div>
-                    )}
-                  </details>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-5 border-t border-gray-100 pt-4">
-              <AddMemberForm action={addMember} />
-            </div>
-          </Card>
-        </div>
+                      <span className="block text-xs text-gray-500">
+                        {m.role || "역할 미입력"}
+                        {m.lastSeenAt && ` · 최근 입장 ${formatRelative(m.lastSeenAt)}`}
+                      </span>
+                    </span>
+                    <span className="text-xs text-brand-600">편집</span>
+                  </summary>
+                  <MemberEditForm action={updateMember.bind(null, m.id)} member={{ name: m.name, role: m.role, color: m.color }} />
+                  {m.id !== user.id && (
+                    <form action={removeMember.bind(null, m.id)} className="mt-2 flex justify-end">
+                      <ConfirmButton message={`${m.name}님을 팀에서 삭제할까요? 담당 태스크는 '미배정'으로 바뀌고 문서는 유지됩니다.`}>삭제</ConfirmButton>
+                    </form>
+                  )}
+                </details>
+              </li>
+            ))}
+          </ul>
+        </Card>
 
         <aside className="space-y-6">
-          <Card title="내 비밀번호 변경">
-            <ChangePasswordForm action={changePassword} />
+          <Card title="팀원 초대">
+            <InviteBox code={entryCode()} origin={await siteOrigin()} />
           </Card>
           <Card title="서비스 연결 상태">
             <ul className="space-y-3">
-              <Status
-                ok={!!databaseUrl()}
-                label="데이터베이스"
-                detail={databaseUrl() ? "Postgres 연결됨" : "로컬 내장 DB(PGlite) 사용 중 — 배포 시 Neon Postgres 연결 필요"}
-              />
+              <Status ok={!!databaseUrl()} label="데이터베이스" detail={databaseUrl() ? "Postgres 연결됨" : "로컬 내장 DB(PGlite) 사용 중"} />
               <Status
                 ok={mode === "blob" && storageReady()}
                 label="파일 저장소"
-                detail={mode === "blob" ? `Vercel Blob (${blobAccess() === "private" ? "비공개" : "공개"})` : storageReady() ? "로컬 폴더(.data/uploads) — 배포 시 Vercel Blob 연결 필요" : "Vercel Blob 미연결 — 업로드 불가"}
+                detail={mode === "blob" ? `Vercel Blob (${blobAccess() === "private" ? "비공개" : "공개"})` : storageReady() ? "로컬 폴더(.data/uploads)" : "Vercel Blob 미연결 — 업로드 불가"}
               />
-              <Status ok={aiConfigured()} label="AI 회의록 정리" detail={aiConfigured() ? `Claude (${AI_MODEL})` : "ANTHROPIC_API_KEY 미설정"} />
+              <Status ok={liveblocksConfigured()} label="실시간 동기화 (Liveblocks)" detail={liveblocksConfigured() ? "연결됨" : "LIVEBLOCKS_SECRET_KEY 미설정 — 실시간 문서 사용 불가"} />
+              <Status ok={figmaConfigured()} label="Figma 미리보기 정보 (선택)" detail={figmaConfigured() ? "FIGMA_TOKEN 연결됨 — 썸네일·수정 시각 표시" : "미설정 — 임베드 미리보기만 사용"} />
             </ul>
           </Card>
         </aside>

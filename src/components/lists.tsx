@@ -1,15 +1,16 @@
 import Link from "next/link";
-import { CheckCircle2, Circle, ExternalLink, FileText, Link2, MapPin, NotebookPen, Sparkles } from "lucide-react";
-import type { ActivityRow, DocumentRow, EventRow, MeetingRow } from "@/lib/data";
+import { ExternalLink, FileText, Link2, MapPin, PenLine } from "lucide-react";
+import type { ActivityRow, DocumentRow, EventRow } from "@/lib/data";
 import { activityHref } from "@/lib/activity";
 import { DOC_CATEGORIES, EVENT_TYPES, optionColor, optionLabel } from "@/lib/constants";
-import { formatDate, formatRelative, formatShortDate, formatTime, toDateKey } from "@/lib/dates";
+import { formatRelative, formatShortDate, formatTime, toDateKey } from "@/lib/dates";
 import { cn, fileExtension, formatBytes } from "@/lib/utils";
 import { Avatar, Badge, Dot, EmptyState } from "./ui";
 import { FigmaLogo } from "./figma-logo";
 
 export function DocIcon({ kind, fileName }: { kind: string; fileName?: string | null }) {
   if (kind === "figma") return <FigmaLogo />;
+  if (kind === "live") return <PenLine className="h-4 w-4 text-brand-600" />;
   if (kind === "link") return <Link2 className="h-4 w-4 text-sky-500" />;
   const ext = fileName ? fileExtension(fileName) : "";
   const color =
@@ -96,14 +97,10 @@ export function EventList({
           <li key={e.id}>
             <Link href={`/schedule?month=${toDateKey(e.startAt).slice(0, 7)}&event=${e.id}`} className="flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-gray-50">
               <span className="mt-1.5">
-                {e.type === "task" ? (
-                  e.done ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4 text-gray-300" />
-                ) : (
-                  <Dot color={optionColor(EVENT_TYPES, e.type)} className="h-2.5 w-2.5" />
-                )}
+                <Dot color={optionColor(EVENT_TYPES, e.type)} className="h-2.5 w-2.5" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className={cn("block truncate text-sm font-medium", e.done ? "text-gray-400 line-through" : "text-gray-900")}>{e.title}</span>
+                <span className="block truncate text-sm font-medium text-gray-900">{e.title}</span>
                 <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500">
                   <span>{eventTimeLabel(e)}</span>
                   <Badge color={optionColor(EVENT_TYPES, e.type)}>{optionLabel(EVENT_TYPES, e.type)}</Badge>
@@ -128,54 +125,6 @@ export function EventList({
                   ))}
                 </span>
               )}
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-export const MEETING_STATUS: Record<string, { label: string; color: string }> = {
-  draft: { label: "원문만 저장", color: "#6b7280" },
-  summarizing: { label: "AI 정리 중", color: "#f59e0b" },
-  ready: { label: "회의록 완료", color: "#10b981" },
-  error: { label: "정리 실패", color: "#ef4444" },
-};
-
-export function MeetingList({ meetings, showProject = true }: { meetings: MeetingRow[]; showProject?: boolean }) {
-  if (!meetings.length)
-    return <EmptyState title="회의록이 없습니다" description="회의 메모를 붙여넣으면 AI가 회의록으로 정리해 드립니다." />;
-  return (
-    <ul className="divide-y divide-gray-100">
-      {meetings.map((m) => {
-        const status = MEETING_STATUS[m.status] ?? MEETING_STATUS.draft;
-        return (
-          <li key={m.id}>
-            <Link href={`/meetings/${m.id}`} className="flex items-start gap-3 rounded-lg px-2 py-2.5 hover:bg-gray-50">
-              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-50">
-                {m.status === "ready" ? <Sparkles className="h-4 w-4 text-violet-500" /> : <NotebookPen className="h-4 w-4 text-violet-400" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-gray-900">{m.title}</span>
-                  <Badge color={status.color} className="shrink-0">
-                    {status.label}
-                  </Badge>
-                </span>
-                {m.summary && <span className="mt-0.5 line-clamp-1 block text-xs text-gray-600">{m.summary}</span>}
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-gray-500">
-                  <span>{formatDate(m.meetingDate)}</span>
-                  {m.attendees.length > 0 && <span>참석 {m.attendees.length}명</span>}
-                  {m.actionCount > 0 && <span>액션 {m.actionCount}건</span>}
-                  {showProject && m.projectName && (
-                    <span className="inline-flex items-center gap-1">
-                      <Dot color={m.projectColor ?? "#6b7280"} />
-                      {m.projectName}
-                    </span>
-                  )}
-                </span>
-              </span>
             </Link>
           </li>
         );

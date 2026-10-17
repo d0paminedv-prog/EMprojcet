@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, ilike, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { activities, documents, documentVersions, events, meetings, members, projects } from "@/db/schema";
+import { activities, documents, documentVersions, events, members, projects, tasks } from "@/db/schema";
 
 // ---------- 문서 ----------
 
@@ -27,6 +27,8 @@ export async function listDocuments(opts: {
       kind: documents.kind,
       category: documents.category,
       url: documents.url,
+      figmaMeta: documents.figmaMeta,
+      lastEditedAt: documents.lastEditedAt,
       updatedAt: documents.updatedAt,
       projectId: documents.projectId,
       projectName: projects.name,
@@ -68,7 +70,6 @@ export async function listEvents(opts: {
   to?: Date;
   projectId?: string | null;
   memberId?: string | null;
-  onlyOpenTasks?: boolean;
   limit?: number;
 }) {
   const where: SQL[] = [];
@@ -81,7 +82,6 @@ export async function listEvents(opts: {
   }
   if (opts.projectId) where.push(eq(events.projectId, opts.projectId));
   if (opts.memberId) where.push(sql`${events.assigneeIds} @> ${JSON.stringify([opts.memberId])}::jsonb`);
-  if (opts.onlyOpenTasks) where.push(and(eq(events.type, "task"), eq(events.done, false))!);
 
   return db
     .select({
@@ -94,8 +94,6 @@ export async function listEvents(opts: {
       location: events.location,
       description: events.description,
       assigneeIds: events.assigneeIds,
-      done: events.done,
-      meetingId: events.meetingId,
       projectId: events.projectId,
       projectName: projects.name,
       projectColor: projects.color,
@@ -109,37 +107,71 @@ export async function listEvents(opts: {
 
 export type EventRow = Awaited<ReturnType<typeof listEvents>>[number];
 
-// ---------- 회의록 ----------
+// ---------- 태스크 ----------
 
-export async function listMeetings(opts: { projectId?: string | null; limit?: number; q?: string } = {}) {
+export async function listTasks(opts: {
+  assigneeId?: string | null;
+  projectId?: string | null;
+  status?: string;
+  openOnly?: boolean;
+  doneSince?: Date;
+  dueBefore?: string;
+  dueFrom?: string;
+  limit?: number;
+} = {}) {
   const where: SQL[] = [];
-  if (opts.projectId) where.push(eq(meetings.projectId, opts.projectId));
-  if (opts.q) {
-    const like = `%${opts.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-    where.push(or(ilike(meetings.title, like), ilike(meetings.rawNotes, like))!);
-  }
+  if (opts.assigneeId) where.push(eq(tasks.assigneeId, opts.assigneeId));
+  if (opts.projectId) where.push(eq(tasks.projectId, opts.projectId));
+  if (opts.status) where.push(eq(tasks.status, opts.status));
+  if (opts.openOnly) where.push(sql`${tasks.status} <> 'done'`);
+  if (opts.doneSince) where.push(or(sql`${tasks.status} <> 'done'`, gte(tasks.completedAt, opts.doneSince))!);
+  if (opts.dueBefore) where.push(sql`${tasks.dueDate} < ${opts.dueBefore}`);
+  if (opts.dueFrom) where.push(sql`${tasks.dueDate} >= ${opts.dueFrom}`);
+
   return db
     .select({
-      id: meetings.id,
-      title: meetings.title,
-      meetingDate: meetings.meetingDate,
-      attendees: meetings.attendees,
-      status: meetings.status,
-      summary: sql<string | null>`${meetings.minutes}->>'summary'`,
-      actionCount: sql<number>`coalesce(jsonb_array_length(${meetings.minutes}->'actionItems'), 0)::int`,
-      projectId: meetings.projectId,
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      figmaUrl: tasks.figmaUrl,
+      documentId: tasks.documentId,
+      documentTitle: documents.title,
+      assigneeId: tasks.assigneeId,
+      assigneeName: members.name,
+      assigneeColor: members.color,
+      projectId: tasks.projectId,
       projectName: projects.name,
       projectColor: projects.color,
-      updatedAt: meetings.updatedAt,
+      sortOrder: tasks.sortOrder,
+      completedAt: tasks.completedAt,
+      updatedAt: tasks.updatedAt,
     })
-    .from(meetings)
-    .leftJoin(projects, eq(projects.id, meetings.projectId))
+    .from(tasks)
+    .leftJoin(members, eq(members.id, tasks.assigneeId))
+    .leftJoin(projects, eq(projects.id, tasks.projectId))
+    .leftJoin(documents, eq(documents.id, tasks.documentId))
     .where(where.length ? and(...where) : undefined)
-    .orderBy(desc(meetings.meetingDate), desc(meetings.createdAt))
-    .limit(opts.limit ?? 200);
+    .orderBy(sql`${tasks.dueDate} asc nulls last`, asc(tasks.sortOrder), asc(tasks.createdAt))
+    .limit(opts.limit ?? 1000);
 }
 
-export type MeetingRow = Awaited<ReturnType<typeof listMeetings>>[number];
+export type TaskRow = Awaited<ReturnType<typeof listTasks>>[number];
+
+/** 프로젝트별 태스크 진행률 */
+export async function projectProgress(): Promise<Map<string, { total: number; done: number }>> {
+  const rows = await db
+    .select({
+      projectId: tasks.projectId,
+      total: sql<number>`count(*)::int`,
+      done: sql<number>`count(*) filter (where ${tasks.status} = 'done')::int`,
+    })
+    .from(tasks)
+    .groupBy(tasks.projectId);
+  return new Map(rows.filter((r) => r.projectId).map((r) => [r.projectId!, { total: r.total, done: r.done }]));
+}
 
 // ---------- 활동 ----------
 

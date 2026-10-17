@@ -1,8 +1,25 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { notifyChange } from "./realtime";
+
+/** 폼 제출(서버 저장)이 끝나면 다른 팀원 화면에 변경 알림 */
+function useNotifyWhenDone(pending: boolean) {
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (wasPending.current && !pending) notifyChange();
+    wasPending.current = pending;
+  }, [pending]);
+}
+
+/** 일반 버튼을 쓰는 폼 안에 넣으면 제출 완료 후 변경 알림 */
+export function NotifyAfterSubmit() {
+  const { pending } = useFormStatus();
+  useNotifyWhenDone(pending);
+  return null;
+}
 
 export function SubmitButton({
   children,
@@ -18,6 +35,7 @@ export function SubmitButton({
   value?: string;
 }) {
   const { pending } = useFormStatus();
+  useNotifyWhenDone(pending);
   return (
     <button type="submit" className={className} disabled={pending} name={name} value={value}>
       {pending ? pendingText ?? "처리 중…" : children}
@@ -36,6 +54,7 @@ export function ConfirmButton({
   className?: string;
 }) {
   const { pending } = useFormStatus();
+  useNotifyWhenDone(pending);
   return (
     <button
       type="submit"

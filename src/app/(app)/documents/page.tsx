@@ -8,7 +8,7 @@ import { listDocuments } from "@/lib/data";
 import { projectOptions } from "@/lib/queries";
 import { isUuid } from "@/lib/utils";
 
-export const metadata: Metadata = { title: "문서함" };
+export const metadata: Metadata = { title: "문서" };
 
 export default async function DocumentsPage({
   searchParams,
@@ -26,16 +26,18 @@ export default async function DocumentsPage({
   return (
     <div>
       <PageHeader
-        title="문서함"
-        description="팀이 함께 보는 기획서, 디자인 시안, 계약서, 결과 보고서"
+        title="문서"
+        description="함께 편집하는 실시간 문서와 기획서·디자인 시안·계약서 파일"
         actions={
           <>
+            <Link href={`/documents/new?kind=file${projectId ? `&project=${projectId}` : ""}`} className="btn-secondary">
+              파일 업로드
+            </Link>
             <Link href={`/documents/new?kind=figma${projectId ? `&project=${projectId}` : ""}`} className="btn-secondary">
-              Figma 링크 추가
+              Figma 링크
             </Link>
             <Link href={`/documents/new${projectId ? `?project=${projectId}` : ""}`} className="btn-primary">
-              <Plus className="h-4 w-4" />
-              문서 업로드
+              <Plus className="h-4 w-4" />새 실시간 문서
             </Link>
           </>
         }

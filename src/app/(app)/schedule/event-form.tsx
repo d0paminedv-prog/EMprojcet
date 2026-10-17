@@ -17,7 +17,6 @@ export type EventFormValues = {
   description: string;
   projectId: string;
   assigneeIds: string[];
-  done: boolean;
 };
 
 export function EventForm({
@@ -133,12 +132,6 @@ export function EventForm({
         <textarea id="ev-desc" name="description" rows={3} className="input" defaultValue={values.description} />
       </div>
 
-      {type === "task" && (
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input type="checkbox" name="done" defaultChecked={values.done} className="h-4 w-4 rounded border-gray-300" />
-          완료됨
-        </label>
-      )}
 
       <FormError state={state} />
       <SubmitButton className="btn-primary w-full">{submitLabel}</SubmitButton>

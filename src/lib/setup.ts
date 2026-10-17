@@ -6,6 +6,6 @@ export function missingRequiredEnv(): string[] {
   const missing: string[] = [];
   if (!databaseUrl()) missing.push("DATABASE_URL (Storage 탭에서 Neon Postgres 연결)");
   if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 16) missing.push("AUTH_SECRET (16자 이상 임의 문자열)");
-  if (!process.env.TEAM_PASSWORD) missing.push("TEAM_PASSWORD (팀 초대 코드)");
+  if (!process.env.LIVEBLOCKS_SECRET_KEY) missing.push("LIVEBLOCKS_SECRET_KEY (liveblocks.io 무료 가입 후 Secret key)");
   return missing;
 }

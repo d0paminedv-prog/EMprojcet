@@ -31,6 +31,7 @@ export const DOC_CATEGORIES: Option[] = [
 ];
 
 export const DOC_KINDS: Option[] = [
+  { value: "live", label: "실시간 문서" },
   { value: "file", label: "파일" },
   { value: "figma", label: "Figma" },
   { value: "link", label: "링크" },
@@ -42,8 +43,20 @@ export const EVENT_TYPES: Option[] = [
   { value: "event", label: "행사·운영", color: "#10b981" },
   { value: "shooting", label: "촬영", color: "#ec4899" },
   { value: "install", label: "설치·철수", color: "#f59e0b" },
-  { value: "task", label: "할 일", color: "#0ea5e9" },
   { value: "etc", label: "기타", color: "#6b7280" },
+];
+
+export const TASK_STATUSES: Option[] = [
+  { value: "todo", label: "할 일", color: "#6b7280" },
+  { value: "doing", label: "진행 중", color: "#3b82f6" },
+  { value: "review", label: "검토", color: "#f59e0b" },
+  { value: "done", label: "완료", color: "#10b981" },
+];
+
+export const TASK_PRIORITIES: Option[] = [
+  { value: "high", label: "높음", color: "#ef4444" },
+  { value: "normal", label: "보통", color: "#6b7280" },
+  { value: "low", label: "낮음", color: "#9ca3af" },
 ];
 
 export const PALETTE = [

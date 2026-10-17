@@ -3,6 +3,8 @@
 import { and, eq, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
+import { refreshFigmaDocs } from "@/lib/figma";
 import { db } from "@/db";
 import { comments, documents, documentVersions } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
@@ -98,6 +100,7 @@ export async function createLinkDocument(_prev: ActionState, form: FormData): Pr
     targetTitle: doc.title,
     projectId: doc.projectId,
   });
+  if (kind === "figma") after(() => refreshFigmaDocs([{ id: doc.id, url: doc.url, figmaMeta: null }]));
   revalidatePath("/", "layout");
   redirect(`/documents/${doc.id}`);
 }
@@ -158,7 +161,7 @@ export async function updateDocument(id: string, _prev: ActionState, form: FormD
       category: cleanCategory(str(form, "category")),
       description: str(form, "description"),
       projectId: isUuid(projectId) ? projectId : null,
-      url: doc.kind === "file" ? null : url,
+      url: doc.kind === "figma" || doc.kind === "link" ? url : null,
       updatedAt: new Date(),
     })
     .where(eq(documents.id, id));

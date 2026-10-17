@@ -2,22 +2,26 @@
 
 import { useActionState, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileUp, Link2, UploadCloud } from "lucide-react";
+import { FileText, FileUp, Link2, PenLine, UploadCloud } from "lucide-react";
 import { FigmaLogo } from "@/components/figma-logo";
 import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
+import { notifyChange } from "@/components/realtime";
 import { uploadFile } from "@/lib/upload-client";
 import { cn, fileExtension, formatBytes } from "@/lib/utils";
 import { createFileDocument, createLinkDocument } from "../actions";
+import { createLiveDocument, importDocx } from "../live-actions";
 
 type Props = {
   projects: { id: string; name: string }[];
   defaultProjectId: string;
-  defaultKind: "file" | "figma" | "link";
+  defaultKind: "live" | "file" | "figma" | "link";
+  templates: { id: string; label: string; category: string }[];
   storage: { mode: "blob" | "local"; access: "private" | "public"; ready: boolean };
 };
 
 const TABS = [
+  { value: "live", label: "실시간 문서", icon: PenLine },
   { value: "file", label: "파일 업로드", icon: FileUp },
   { value: "figma", label: "Figma 링크", icon: null },
   { value: "link", label: "웹 링크", icon: Link2 },
@@ -95,6 +99,7 @@ function FileUploadForm({ projects, defaultProjectId, storage }: Props) {
         file: uploaded,
       });
       if (result.error || !result.id) throw new Error(result.error ?? "등록에 실패했습니다.");
+      notifyChange("documents");
       router.push(`/documents/${result.id}`);
       router.refresh();
     } catch (err) {
@@ -213,18 +218,119 @@ function LinkForm({ kind, projects, defaultProjectId }: { kind: "figma" | "link"
   );
 }
 
+const TEMPLATE_HINT: Record<string, string> = {
+  blank: "빈 페이지에서 시작",
+  minutes: "일시·참석자·안건·결정·할 일",
+  proposal: "개요·KPI·타깃·프로그램·운영",
+  report: "성과 표·인사이트·개선점",
+};
+
+function LiveDocForm({ projects, defaultProjectId, templates, storage }: Props) {
+  const router = useRouter();
+  const [templateId, setTemplateId] = useState("blank");
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const docxRef = useRef<HTMLInputElement>(null);
+  const selected = templates.find((t) => t.id === templateId) ?? templates[0];
+
+  function formValues() {
+    const form = new FormData(formRef.current ?? undefined);
+    return { projectId: String(form.get("projectId") ?? ""), category: String(form.get("category") ?? "etc") };
+  }
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy("문서 만드는 중…");
+    setError(null);
+    const result = await createLiveDocument({ title, templateId, ...formValues() });
+    if (result.error || !result.id) {
+      setBusy(null);
+      return setError(result.error ?? "문서를 만들지 못했습니다.");
+    }
+    notifyChange("documents");
+    router.push(`/documents/${result.id}`);
+  }
+
+  async function importWord(file: File | undefined) {
+    if (!file) return;
+    if (fileExtension(file.name) !== "docx") return setError("Word(.docx) 파일만 불러올 수 있습니다. (.doc 은 Word에서 .docx 로 저장 후 올려 주세요)");
+    setBusy("Word 파일을 실시간 문서로 바꾸는 중…");
+    setError(null);
+    try {
+      const uploaded = await uploadFile(file, storage.mode, storage.access);
+      const result = await importDocx({ ...formValues(), file: uploaded });
+      if (result.error || !result.id) throw new Error(result.error ?? "가져오기 실패");
+      notifyChange("documents");
+      router.push(`/documents/${result.id}`);
+    } catch (err) {
+      setBusy(null);
+      setError(err instanceof Error ? err.message : "가져오기 실패");
+    } finally {
+      if (docxRef.current) docxRef.current.value = "";
+    }
+  }
+
+  return (
+    <form ref={formRef} onSubmit={create} className="space-y-5">
+      <div>
+        <span className="label">템플릿</span>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {templates.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTemplateId(t.id)}
+              className={cn(
+                "rounded-lg border p-3 text-left transition",
+                templateId === t.id ? "border-brand-500 bg-brand-50 ring-2 ring-brand-100" : "border-gray-200 hover:border-gray-300",
+              )}
+            >
+              <FileText className="mb-1.5 h-4 w-4 text-brand-600" />
+              <span className="block text-sm font-medium text-gray-900">{t.label}</span>
+              <span className="block text-[11px] leading-snug text-gray-500">{TEMPLATE_HINT[t.id] ?? ""}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="label" htmlFor="live-title">
+          문서 제목
+        </label>
+        <input id="live-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={selected.id === "blank" ? "예) 팝업 운영 체크리스트" : selected.label} />
+      </div>
+      <ProjectAndCategory projects={projects} defaultProjectId={defaultProjectId} defaultCategory={selected.category} />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex flex-col-reverse gap-3 border-t border-gray-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <button type="button" className="btn-secondary" onClick={() => docxRef.current?.click()} disabled={!!busy || !storage.ready}>
+            <FileUp className="h-4 w-4" />
+            Word(.docx) 불러와서 시작
+          </button>
+          <input ref={docxRef} type="file" accept=".docx" className="hidden" onChange={(e) => importWord(e.target.files?.[0])} />
+        </div>
+        <button type="submit" className="btn-primary" disabled={!!busy}>
+          {busy ?? "실시간 문서 만들기"}
+        </button>
+      </div>
+      <p className="text-xs text-gray-500">실시간 문서는 팀원이 동시에 열어 함께 편집할 수 있고, 언제든 Word(.docx)로 내보낼 수 있습니다.</p>
+    </form>
+  );
+}
+
 export function NewDocumentForm(props: Props) {
   const [kind, setKind] = useState<Props["defaultKind"]>(props.defaultKind);
   return (
     <div className="card p-5">
-      <div className="mb-5 flex gap-1 rounded-lg bg-gray-100 p-1">
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 sm:grid-cols-4">
         {TABS.map((t) => (
           <button
             key={t.value}
             type="button"
             onClick={() => setKind(t.value)}
             className={cn(
-              "flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-sm font-medium transition",
+              "flex items-center justify-center gap-1.5 rounded-md py-2 text-sm font-medium transition",
               kind === t.value ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
             )}
           >
@@ -238,7 +344,13 @@ export function NewDocumentForm(props: Props) {
           Vercel Blob 저장소가 연결되지 않아 파일을 올릴 수 없습니다. Vercel → Storage 탭에서 Blob 스토어를 연결하세요.
         </p>
       )}
-      {kind === "file" ? <FileUploadForm {...props} /> : <LinkForm kind={kind} projects={props.projects} defaultProjectId={props.defaultProjectId} key={kind} />}
+      {kind === "live" ? (
+        <LiveDocForm {...props} />
+      ) : kind === "file" ? (
+        <FileUploadForm {...props} />
+      ) : (
+        <LinkForm kind={kind} projects={props.projects} defaultProjectId={props.defaultProjectId} key={kind} />
+      )}
     </div>
   );
 }

@@ -122,3 +122,8 @@ export function shiftMonth(year: number, month: number, delta: number) {
   const idx = year * 12 + (month - 1) + delta;
   return { year: Math.floor(idx / 12), month: (idx % 12) + 1 };
 }
+
+/** 지금으로부터 n일 전 시각 */
+export function daysAgo(n: number): Date {
+  return new Date(Date.now() - n * 86400000);
+}
