@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { PageHeader } from "@/components/ui";
 import { projectOptions } from "@/lib/queries";
-import { blobAccess, storageMode, storageReady } from "@/lib/storage";
+import { storageClientConfig } from "@/lib/storage";
 import { docTemplates } from "@/lib/templates";
 import { NewDocumentForm } from "./new-document-form";
 
@@ -18,7 +18,7 @@ export default async function NewDocumentPage({ searchParams }: { searchParams: 
         defaultProjectId={projects.some((p) => p.id === project) ? project! : ""}
         defaultKind={kind === "figma" || kind === "link" || kind === "file" ? kind : "live"}
         templates={docTemplates().map(({ id, label, category }) => ({ id, label, category }))}
-        storage={{ mode: storageMode(), access: blobAccess(), ready: storageReady() }}
+        storage={storageClientConfig()}
       />
     </div>
   );

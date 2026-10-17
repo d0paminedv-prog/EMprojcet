@@ -14,7 +14,7 @@ import { DOC_CATEGORIES, optionLabel } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/dates";
 import { previewKind } from "@/lib/mime";
 import { projectOptions } from "@/lib/queries";
-import { blobAccess, readFileBuffer, storageMode, storageReady } from "@/lib/storage";
+import { readFileBuffer, storageClientConfig } from "@/lib/storage";
 import { figmaEmbedUrl, formatBytes, isUuid } from "@/lib/utils";
 import { deleteComment, deleteDocument, updateDocument } from "../actions";
 import { CommentForm, DocumentEditForm, VersionUploader } from "./doc-client";
@@ -120,7 +120,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
     projectOptions(),
   ]);
   const latest = versions[0]?.version;
-  const storage = { mode: storageMode(), access: blobAccess(), ready: storageReady() };
+  const storage = storageClientConfig();
   if (doc.kind === "figma") after(() => refreshFigmaDocs([{ id: doc.id, url: doc.url, figmaMeta: doc.figmaMeta }]));
 
   const breadcrumb = (

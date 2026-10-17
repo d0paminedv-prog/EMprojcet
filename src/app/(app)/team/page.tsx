@@ -79,7 +79,7 @@ export default async function TeamPage() {
                 detail={mode === "blob" ? `Vercel Blob (${blobAccess() === "private" ? "비공개" : "공개"})` : storageReady() ? "로컬 폴더(.data/uploads)" : "Vercel Blob 미연결 — 업로드 불가"}
               />
               <Status ok={liveblocksConfigured()} label="실시간 동기화 (Liveblocks)" detail={liveblocksConfigured() ? "연결됨" : "LIVEBLOCKS_SECRET_KEY 미설정 — 실시간 문서 사용 불가"} />
-              <Status ok={figmaConfigured()} label="Figma 미리보기 정보 (선택)" detail={figmaConfigured() ? "FIGMA_TOKEN 연결됨 — 썸네일·수정 시각 표시" : "미설정 — 임베드 미리보기만 사용"} />
+              <Status ok label="Figma" detail={figmaConfigured() ? "공유 링크 미리보기 + 썸네일·수정 시각" : "공유 링크로 미리보기 (추가 설정 없음)"} />
             </ul>
           </Card>
         </aside>

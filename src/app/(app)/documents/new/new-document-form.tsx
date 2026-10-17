@@ -7,7 +7,7 @@ import { FigmaLogo } from "@/components/figma-logo";
 import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { notifyChange } from "@/components/realtime";
-import { uploadFile } from "@/lib/upload-client";
+import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { cn, fileExtension, formatBytes } from "@/lib/utils";
 import { createFileDocument, createLinkDocument } from "../actions";
 import { createLiveDocument, importDocx } from "../live-actions";
@@ -17,7 +17,7 @@ type Props = {
   defaultProjectId: string;
   defaultKind: "live" | "file" | "figma" | "link";
   templates: { id: string; label: string; category: string }[];
-  storage: { mode: "blob" | "local"; access: "private" | "public"; ready: boolean };
+  storage: StorageClientConfig;
 };
 
 const TABS = [
@@ -90,7 +90,7 @@ function FileUploadForm({ projects, defaultProjectId, storage }: Props) {
     setError(null);
     setProgress(0);
     try {
-      const uploaded = await uploadFile(file, storage.mode, storage.access, setProgress);
+      const uploaded = await uploadFile(file, storage, setProgress);
       const result = await createFileDocument({
         title,
         projectId: String(form.get("projectId") ?? ""),
@@ -259,7 +259,7 @@ function LiveDocForm({ projects, defaultProjectId, templates, storage }: Props) 
     setBusy("Word 파일을 실시간 문서로 바꾸는 중…");
     setError(null);
     try {
-      const uploaded = await uploadFile(file, storage.mode, storage.access);
+      const uploaded = await uploadFile(file, storage);
       const result = await importDocx({ ...formValues(), file: uploaded });
       if (result.error || !result.id) throw new Error(result.error ?? "가져오기 실패");
       notifyChange("documents");

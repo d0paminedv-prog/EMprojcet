@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui";
 import { notifyChange, useRealtime } from "@/components/realtime";
-import { uploadFile } from "@/lib/upload-client";
+import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { cn } from "@/lib/utils";
 import { createAsset, createSnapshot, getSnapshotContent, saveLiveContent } from "../live-actions";
 
@@ -57,7 +57,7 @@ type Props = {
   initialHtml: string | null;
   lastSavedAt: string | null;
   snapshots: Snapshot[];
-  storage: { mode: "blob" | "local"; access: "private" | "public"; ready: boolean };
+  storage: StorageClientConfig;
 };
 
 const SAVE_DELAY = 1500;
@@ -373,7 +373,7 @@ function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, 
     if (!file || !editor) return;
     setBusy("이미지 올리는 중…");
     try {
-      const uploaded = await uploadFile(file, storage.mode, storage.access);
+      const uploaded = await uploadFile(file, storage);
       const result = await createAsset(uploaded);
       if (result.error || !result.url) throw new Error(result.error ?? "이미지 등록 실패");
       editor.chain().focus().setImage({ src: result.url, alt: file.name }).run();
