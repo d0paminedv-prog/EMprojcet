@@ -1,15 +1,15 @@
 "use server";
 
 import { and, desc, eq, gte } from "drizzle-orm";
-import mammoth from "mammoth";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { activities, assets, documentSnapshots, documents } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { requireUser } from "@/lib/auth";
 import { DOC_CATEGORIES } from "@/lib/constants";
+import { convertFileDocument, docxToHtml } from "@/lib/convert";
 import { mimeFromName } from "@/lib/mime";
-import { isValidStorageKey, readFileBuffer, saveFile } from "@/lib/storage";
+import { isValidStorageKey, readFileBuffer } from "@/lib/storage";
 import { docTemplates } from "@/lib/templates";
 import { fileExtension, isUuid } from "@/lib/utils";
 
@@ -62,24 +62,7 @@ export async function importDocx(input: {
 
   let html: string;
   try {
-    const result = await mammoth.convertToHtml(
-      { buffer },
-      {
-        styleMap: ["u => u", "strike => s"],
-        convertImage: mammoth.images.imgElement(async (image) => {
-          const data = await image.readAsBuffer();
-          const ext = (image.contentType.split("/")[1] ?? "png").replace("jpeg", "jpg").replace(/[^a-z0-9]/g, "");
-          const fileName = `image.${ext}`;
-          const saved = await saveFile(data, fileName, image.contentType);
-          const [asset] = await db
-            .insert(assets)
-            .values({ fileName, mimeType: image.contentType, size: data.length, storage: saved.storage, storageKey: saved.key, createdBy: user.id })
-            .returning({ id: assets.id });
-          return { src: `/api/assets/${asset.id}` };
-        }),
-      },
-    );
-    html = result.value || "<p></p>";
+    html = (await docxToHtml(buffer, user.id)) || "<p></p>";
   } catch (err) {
     console.error("docx 변환 실패:", err);
     return { error: "Word 파일을 변환하지 못했습니다. 파일이 손상되지 않았는지 확인하세요." };
@@ -101,6 +84,19 @@ export async function importDocx(input: {
   await logActivity({ actorId: user.id, verb: "Word 파일을 실시간 문서로 가져왔습니다", targetType: "document", targetId: doc.id, targetTitle: doc.title, projectId: doc.projectId });
   revalidatePath("/", "layout");
   return { id: doc.id };
+}
+
+/** 업로드한 Word·텍스트 파일 문서 → 실시간 문서 (원본 파일은 버전 기록에 보관) */
+export async function makeDocumentEditable(documentId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  if (!isUuid(documentId)) return { error: "잘못된 요청입니다." };
+  const result = await convertFileDocument(documentId, user.id);
+  if (result.error || !result.doc) return { error: result.error ?? "편집 문서로 바꾸지 못했습니다." };
+  if (result.converted) {
+    await logActivity({ actorId: user.id, verb: "업로드 문서를 편집 문서로 열었습니다", targetType: "document", targetId: documentId, targetTitle: result.doc.title, projectId: result.doc.projectId });
+  }
+  revalidatePath("/", "layout");
+  return {};
 }
 
 /** 편집 내용 사본 저장 (검색·Word 내보내기·버전 기록용). 본문 원본은 Liveblocks 에 실시간 저장됨 */

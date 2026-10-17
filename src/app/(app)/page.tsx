@@ -4,7 +4,7 @@ import { CalendarDays, FilePlus2, ListPlus, Plus } from "lucide-react";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { ActivityFeed, DocumentList, EventList } from "@/components/lists";
-import { OnlineDot } from "@/components/realtime";
+import { MemberActivity, OnlineDot } from "@/components/realtime";
 import { TaskList } from "@/components/task-list";
 import { Avatar, Badge, Card, EmptyState, TextLink } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
@@ -52,6 +52,7 @@ function MemberCard({
           <p className="truncate text-xs text-gray-500">{member.role || "역할 미입력"}</p>
         </div>
       </div>
+      <MemberActivity memberId={member.id} isMe={isMe} className="mt-2.5 rounded-lg bg-gray-50 px-2 py-1.5" />
       <div className="mt-3 grid grid-cols-4 gap-1 text-center">
         {[
           { label: "할 일", value: open.length, cls: "text-gray-900" },

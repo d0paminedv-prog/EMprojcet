@@ -8,6 +8,7 @@ import { members, projects } from "@/db/schema";
 import { FigmaGallery } from "@/components/figma-gallery";
 import { ActivityFeed, DocumentList, EventList } from "@/components/lists";
 import { TaskList } from "@/components/task-list";
+import { HereNow } from "@/components/realtime";
 import { Badge, Card, PageHeader, TextLink } from "@/components/ui";
 import { listActivities, listDocuments, listEvents, listTasks } from "@/lib/data";
 import { PROJECT_CATEGORIES, PROJECT_STATUSES, TASK_STATUSES, optionColor, optionLabel } from "@/lib/constants";
@@ -89,6 +90,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           <div className="mb-3 flex flex-wrap gap-2">
             <Badge color={optionColor(PROJECT_STATUSES, p.status)}>{optionLabel(PROJECT_STATUSES, p.status)}</Badge>
             <Badge className="bg-gray-100 text-gray-700">{optionLabel(PROJECT_CATEGORIES, p.category)}</Badge>
+            <HereNow />
           </div>
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{p.description || "프로젝트 개요를 입력해 두면 팀원 모두가 목표를 공유할 수 있습니다."}</p>
           <div className="mt-5">

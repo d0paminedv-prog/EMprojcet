@@ -1,30 +1,14 @@
 import Link from "next/link";
-import { ExternalLink, FileText, Link2, MapPin, PenLine } from "lucide-react";
+import { ExternalLink, MapPin } from "lucide-react";
 import type { ActivityRow, DocumentRow, EventRow } from "@/lib/data";
 import { activityHref } from "@/lib/activity";
 import { DOC_CATEGORIES, EVENT_TYPES, optionColor, optionLabel } from "@/lib/constants";
 import { formatRelative, formatShortDate, formatTime, toDateKey } from "@/lib/dates";
-import { cn, fileExtension, formatBytes } from "@/lib/utils";
+import { fileExtension, formatBytes } from "@/lib/utils";
 import { Avatar, Badge, Dot, EmptyState } from "./ui";
-import { FigmaLogo } from "./figma-logo";
+import { DocIcon } from "./doc-icon";
 
-export function DocIcon({ kind, fileName }: { kind: string; fileName?: string | null }) {
-  if (kind === "figma") return <FigmaLogo />;
-  if (kind === "live") return <PenLine className="h-4 w-4 text-brand-600" />;
-  if (kind === "link") return <Link2 className="h-4 w-4 text-sky-500" />;
-  const ext = fileName ? fileExtension(fileName) : "";
-  const color =
-    ext === "docx" || ext === "doc"
-      ? "text-blue-600"
-      : ext === "pdf"
-        ? "text-red-500"
-        : ext === "pptx" || ext === "ppt"
-          ? "text-orange-500"
-          : ext === "xlsx" || ext === "xls" || ext === "csv"
-            ? "text-emerald-600"
-            : "text-gray-500";
-  return <FileText className={cn("h-4 w-4", color)} />;
-}
+export { DocIcon };
 
 export function DocumentList({ docs, showProject = true }: { docs: DocumentRow[]; showProject?: boolean }) {
   if (!docs.length) return <EmptyState title="등록된 문서가 없습니다" description="Word 문서, PDF, Figma 링크 등을 올려 팀과 공유하세요." />;

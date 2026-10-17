@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { databaseUrl } from "@/db";
 import { ConfirmButton } from "@/components/form-controls";
+import { MemberActivity, OnlineDot } from "@/components/realtime";
 import { Avatar, Badge, Card, PageHeader } from "@/components/ui";
 import { MAX_MEMBERS, entryCode, listMembers, requireUser } from "@/lib/auth";
 import { formatRelative } from "@/lib/dates";
@@ -41,7 +42,10 @@ export default async function TeamPage() {
               <li key={m.id} className="py-3 first:pt-0 last:pb-0">
                 <details>
                   <summary className="flex cursor-pointer list-none items-center gap-3">
-                    <Avatar name={m.name} color={m.color} />
+                    <span className="relative">
+                      <Avatar name={m.name} color={m.color} />
+                      <OnlineDot memberId={m.id} />
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-900">{m.name}</span>
@@ -51,6 +55,7 @@ export default async function TeamPage() {
                         {m.role || "역할 미입력"}
                         {m.lastSeenAt && ` · 최근 입장 ${formatRelative(m.lastSeenAt)}`}
                       </span>
+                      <MemberActivity memberId={m.id} isMe={m.id === user.id} className="mt-0.5" />
                     </span>
                     <span className="text-xs text-brand-600">편집</span>
                   </summary>

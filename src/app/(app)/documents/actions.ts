@@ -10,7 +10,8 @@ import { comments, documents, documentVersions } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { requireUser } from "@/lib/auth";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES } from "@/lib/constants";
-import { mimeFromName } from "@/lib/mime";
+import { convertFileDocument } from "@/lib/convert";
+import { isEditableFile, mimeFromName } from "@/lib/mime";
 import { deleteFile, isValidStorageKey } from "@/lib/storage";
 import { fileExtension, isFigmaUrl, isHttpUrl, isUuid, str, type ActionState } from "@/lib/utils";
 
@@ -32,7 +33,9 @@ export async function createFileDocument(input: {
   category: string;
   description: string;
   file: UploadedFileInput;
-}): Promise<{ error?: string; id?: string }> {
+  /** Word·텍스트 파일을 바로 실시간 문서로 바꿈 (원본은 버전 기록에 보관) */
+  editable?: boolean;
+}): Promise<{ error?: string; id?: string; warning?: string }> {
   const user = await requireUser();
   const fileError = validateFile(input.file);
   if (fileError) return { error: fileError };
@@ -65,9 +68,17 @@ export async function createFileDocument(input: {
     return doc;
   });
 
-  await logActivity({ actorId: user.id, verb: "문서를 올렸습니다", targetType: "document", targetId: doc.id, targetTitle: doc.title, projectId });
+  let warning: string | undefined;
+  let verb = "문서를 올렸습니다";
+  if (input.editable && isEditableFile(input.file.fileName)) {
+    const converted = await convertFileDocument(doc.id, user.id);
+    if (converted.error) warning = `${converted.error} 파일 미리보기로 등록했습니다.`;
+    else verb = "문서를 올려 편집 문서로 열었습니다";
+  }
+
+  await logActivity({ actorId: user.id, verb, targetType: "document", targetId: doc.id, targetTitle: doc.title, projectId });
   revalidatePath("/", "layout");
-  return { id: doc.id };
+  return { id: doc.id, warning };
 }
 
 export async function createLinkDocument(_prev: ActionState, form: FormData): Promise<ActionState> {
