@@ -90,6 +90,68 @@ body {
 .bx-editor > :first-child {
   margin-top: 0;
 }
+
+/* 제목 위치 링크 버튼 (제목에 마우스를 올리면 왼쪽 여백에 표시) */
+.bx-editor h1,
+.bx-editor h2,
+.bx-editor h3 {
+  position: relative;
+}
+.bx-editor .bx-heading-link {
+  position: absolute;
+  left: -1.9rem;
+  top: 0.15em;
+  display: inline-flex;
+  height: 1.5rem;
+  width: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  color: #9ca3af;
+  opacity: 0;
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+.bx-editor h1:hover .bx-heading-link,
+.bx-editor h2:hover .bx-heading-link,
+.bx-editor h3:hover .bx-heading-link,
+.bx-editor .bx-heading-link:focus-visible {
+  opacity: 1;
+}
+.bx-editor .bx-heading-link:hover {
+  background: #eef2ff;
+  color: #4f46e5;
+}
+/* 터치 화면·좁은 화면: 제목 오른쪽 끝에 항상 흐리게 표시 */
+@media (hover: none), (max-width: 639px) {
+  .bx-editor .bx-heading-link {
+    position: static;
+    float: right;
+    margin-left: 0.25rem;
+    opacity: 0.55;
+  }
+}
+
+/* 공유 링크로 연 위치 강조 */
+.bx-editor .bx-link-target {
+  border-radius: 0.375rem;
+  animation: bx-link-flash 4s ease-out;
+}
+.bx-editor .bx-link-target-range {
+  background: #fde68a;
+  border-radius: 2px;
+}
+@keyframes bx-link-flash {
+  0%,
+  60% {
+    background: #fef3c7;
+    box-shadow: 0 0 0 6px #fef3c7;
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
 .bx-editor ul,
 .bx-editor ol {
   padding-left: 1.5em;

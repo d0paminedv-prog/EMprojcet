@@ -15,11 +15,15 @@ import { DOC_CATEGORIES, optionLabel } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/dates";
 import { decodeText } from "@/lib/convert";
 import { isEditableFile, previewKind } from "@/lib/mime";
-import { projectOptions } from "@/lib/queries";
+import { linkedDocumentTitles, projectOptions } from "@/lib/queries";
 import { readFileBuffer, storageClientConfig } from "@/lib/storage";
 import { figmaEmbedUrl, formatBytes, isUuid } from "@/lib/utils";
 import { deleteComment, deleteDocument, updateDocument } from "../actions";
 import { CommentForm, DocumentEditForm, MakeEditableButton, VersionUploader } from "./doc-client";
+import { LinkedText } from "@/components/linked-text";
+import { PdfPageLink, ShareLinkButton } from "@/components/share-link";
+import { isPositionCode, parsePageNumber } from "@/lib/links";
+import { siteOrigin } from "@/lib/site";
 import { LiveEditor } from "./live-editor";
 import { after } from "next/server";
 import { docRoomId } from "@/lib/liveblocks";
@@ -70,11 +74,17 @@ async function TextPreview({ version }: { version: DocumentVersion }) {
   return <pre className="max-h-[75vh] overflow-auto whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800">{text}</pre>;
 }
 
-function FilePreview({ version }: { version: DocumentVersion }) {
+function FilePreview({ version, documentId, title, page }: { version: DocumentVersion; documentId: string; title: string; page: number | null }) {
   const src = `/api/files/${version.id}`;
   switch (previewKind(version.fileName)) {
     case "pdf":
-      return <iframe title="PDF 미리보기" src={src} className="h-[75vh] w-full rounded-lg border border-gray-200" />;
+      return (
+        <>
+          <PdfPageLink documentId={documentId} title={title} initialPage={page} />
+          {/* 브라우저 PDF 보기의 #page= 로 해당 쪽부터 표시 */}
+          <iframe key={page ?? 0} title="PDF 미리보기" src={page ? `${src}#page=${page}` : src} className="h-[75vh] w-full rounded-lg border border-gray-200" />
+        </>
+      );
     case "image":
       // eslint-disable-next-line @next/next/no-img-element
       return <img src={src} alt={version.fileName} className="mx-auto max-h-[75vh] rounded-lg border border-gray-200" />;
@@ -99,8 +109,17 @@ function FilePreview({ version }: { version: DocumentVersion }) {
   }
 }
 
-export default async function DocumentPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DocumentPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ at?: string; page?: string }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
+  const focusAt = isPositionCode(sp.at) ? sp.at : null;
+  const pdfPage = parsePageNumber(sp.page);
   const user = await requireUser();
   const row = await getDoc(id);
   if (!row) notFound();
@@ -123,6 +142,8 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
   ]);
   const latest = versions[0]?.version;
   const storage = storageClientConfig();
+  const origin = await siteOrigin();
+  const linkTitles = await linkedDocumentTitles(commentRows.map((c) => c.comment.body), origin);
   if (doc.kind === "figma") after(() => refreshFigmaDocs([{ id: doc.id, url: doc.url, figmaMeta: doc.figmaMeta }]));
 
   const breadcrumb = (
@@ -152,7 +173,9 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
               <p className="text-xs text-gray-500">
                 <b className="font-medium text-gray-900">{authorName ?? "알 수 없음"}</b> · {formatDateTime(comment.createdAt)}
               </p>
-              <p className="mt-0.5 whitespace-pre-wrap text-sm text-gray-800">{comment.body}</p>
+              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-gray-800">
+                <LinkedText text={comment.body} origin={origin} titles={linkTitles} />
+              </p>
             </div>
             {comment.authorId === user.id && (
               <form action={deleteComment.bind(null, comment.id)}>
@@ -196,29 +219,34 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
     return (
       <div>
         {breadcrumb}
-        <div className="mb-4">
-          <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
-            <DocIcon kind="live" />
-            <span className="truncate">{doc.title}</span>
-          </h1>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-            <Badge className="bg-brand-50 text-brand-700">실시간 문서</Badge>
-            <Badge className="bg-gray-100 text-gray-700">{optionLabel(DOC_CATEGORIES, doc.category)}</Badge>
-            <span>
-              {row.createdByName ?? "알 수 없음"} 작성
-              {doc.lastEditedAt && ` · ${editor?.name ?? "알 수 없음"} ${formatRelative(doc.lastEditedAt)} 편집`}
-            </span>
-            {latest && (
-              <a href={`/api/files/${latest.id}?download=1`} className="inline-flex items-center gap-1 text-brand-600 hover:underline" title="편집 문서로 열기 전 업로드한 원본 파일">
-                <Download className="h-3 w-3" />
-                원본 파일 {latest.fileName}
-              </a>
-            )}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
+              <DocIcon kind="live" />
+              <span className="truncate">{doc.title}</span>
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+              <Badge className="bg-brand-50 text-brand-700">실시간 문서</Badge>
+              <Badge className="bg-gray-100 text-gray-700">{optionLabel(DOC_CATEGORIES, doc.category)}</Badge>
+              <span>
+                {row.createdByName ?? "알 수 없음"} 작성
+                {doc.lastEditedAt && ` · ${editor?.name ?? "알 수 없음"} ${formatRelative(doc.lastEditedAt)} 편집`}
+              </span>
+              {latest && (
+                <a href={`/api/files/${latest.id}?download=1`} className="inline-flex items-center gap-1 text-brand-600 hover:underline" title="편집 문서로 열기 전 업로드한 원본 파일">
+                  <Download className="h-3 w-3" />
+                  원본 파일 {latest.fileName}
+                </a>
+              )}
+            </div>
+            {doc.description && <p className="mt-2 text-sm text-gray-600">{doc.description}</p>}
           </div>
-          {doc.description && <p className="mt-2 text-sm text-gray-600">{doc.description}</p>}
+          <ShareLinkButton documentId={doc.id} title={doc.title} className="shrink-0 self-start" />
         </div>
         <LiveEditor
           documentId={doc.id}
+          title={doc.title}
+          focusAt={focusAt}
           roomId={docRoomId(doc.id)}
           initialHtml={doc.content ? null : doc.initialHtml}
           lastSavedAt={doc.lastEditedAt?.toISOString() ?? null}
@@ -264,6 +292,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
         </div>
         <div className="flex shrink-0 flex-wrap items-start gap-2">
           {doc.kind === "file" && latest && isEditableFile(latest.fileName) && <MakeEditableButton documentId={doc.id} fileName={latest.fileName} />}
+          <ShareLinkButton documentId={doc.id} title={doc.title} />
           {latest && (
             <a href={`/api/files/${latest.id}?download=1`} className={doc.kind === "file" && isEditableFile(latest.fileName) ? "btn-secondary" : "btn-primary"}>
               <Download className="h-4 w-4" />
@@ -298,7 +327,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ id: s
                 </a>
               </div>
             )}
-            {doc.kind === "file" && (latest ? <FilePreview version={latest} /> : <Notice tone="warn">업로드된 파일이 없습니다.</Notice>)}
+            {doc.kind === "file" && (latest ? <FilePreview version={latest} documentId={doc.id} title={doc.title} page={pdfPage} /> : <Notice tone="warn">업로드된 파일이 없습니다.</Notice>)}
           </section>
 
           {commentsCard}

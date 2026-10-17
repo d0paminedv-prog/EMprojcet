@@ -9,6 +9,7 @@ import { ClientSideSuspense, RoomProvider } from "@liveblocks/react";
 import { useOthers, useSyncStatus } from "@liveblocks/react/suspense";
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { TableKit } from "@tiptap/extension-table";
 import Image from "@tiptap/extension-image";
@@ -22,6 +23,7 @@ import {
   AlignRight,
   Bold,
   Columns3,
+  ExternalLink,
   FileDown,
   Highlighter,
   History,
@@ -32,6 +34,7 @@ import {
   ListChecks,
   ListOrdered,
   Loader2,
+  MapPin,
   Minus,
   Quote,
   Redo2,
@@ -45,15 +48,21 @@ import {
 } from "lucide-react";
 import { Avatar } from "@/components/ui";
 import { notifyChange, useRealtime } from "@/components/realtime";
+import { absoluteUrl, shareOrCopy, Toast } from "@/components/share-link";
+import { documentPath, parseAppLink } from "@/lib/links";
 import { EMPTY_PRESENCE } from "@/lib/presence";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { cn } from "@/lib/utils";
 import { createAsset, createSnapshot, getSnapshotContent, saveLiveContent } from "../live-actions";
+import { COPY_POSITION_EVENT, decodePosition, describePosition, encodePosition, OPEN_LINK_EVENT, PositionLinks, showTarget } from "./doc-position";
 
 type Snapshot = { id: string; label: string; createdAt: string; createdByName: string | null };
 
 type Props = {
   documentId: string;
+  title: string;
+  /** 공유받은 위치 링크의 위치 코드 (?at=) */
+  focusAt: string | null;
   roomId: string;
   initialHtml: string | null;
   lastSavedAt: string | null;
@@ -85,6 +94,15 @@ function formatClock(iso: string | null): string {
 
 // ---------------- 툴바 ----------------
 
+function editLink(editor: Editor) {
+  const prev = editor.getAttributes("link").href as string | undefined;
+  const url = window.prompt("링크 주소 (비우면 링크 해제)", prev ?? "https://");
+  if (url === null) return;
+  const chain = editor.chain().focus().extendMarkRange("link");
+  if (!url.trim() || url.trim() === "https://") chain.unsetLink().run();
+  else chain.setLink({ href: url.trim() }).run();
+}
+
 function ToolButton({ onClick, active, disabled, label, children }: { onClick: () => void; active?: boolean; disabled?: boolean; label: string; children: React.ReactNode }) {
   return (
     <button
@@ -109,7 +127,7 @@ function Sep() {
   return <span className="mx-0.5 h-5 w-px shrink-0 bg-gray-200" />;
 }
 
-function Toolbar({ editor, onImage }: { editor: Editor; onImage: () => void }) {
+function Toolbar({ editor, onImage, onCopyPositionLink }: { editor: Editor; onImage: () => void; onCopyPositionLink: () => void }) {
   const s = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -174,18 +192,11 @@ function Toolbar({ editor, onImage }: { editor: Editor; onImage: () => void }) {
       <ToolButton label="형광펜" active={s.highlight} onClick={() => chain().toggleHighlight().run()}>
         <Highlighter className="h-4 w-4" />
       </ToolButton>
-      <ToolButton
-        label="링크"
-        active={s.link}
-        onClick={() => {
-          const prev = editor.getAttributes("link").href as string | undefined;
-          const url = window.prompt("링크 주소 (비우면 링크 해제)", prev ?? "https://");
-          if (url === null) return;
-          if (!url.trim() || url.trim() === "https://") chain().extendMarkRange("link").unsetLink().run();
-          else chain().extendMarkRange("link").setLink({ href: url.trim() }).run();
-        }}
-      >
+      <ToolButton label="링크" active={s.link} onClick={() => editLink(editor)}>
         <Link2 className="h-4 w-4" />
+      </ToolButton>
+      <ToolButton label="이 위치 링크 복사" onClick={onCopyPositionLink}>
+        <MapPin className="h-4 w-4" />
       </ToolButton>
       <Sep />
       <ToolButton label="글머리 기호 목록" active={s.bullet} onClick={() => chain().toggleBulletList().run()}>
@@ -243,6 +254,37 @@ function Toolbar({ editor, onImage }: { editor: Editor; onImage: () => void }) {
   );
 }
 
+// 말풍선 설정은 고정 값으로 — 렌더마다 새로 만들면 BubbleMenu 가 매번 편집기 트랜잭션을 보내
+// 방금 클릭한 커서 위치를 이전 위치로 덮어씁니다.
+const showLinkMenu = ({ editor, view }: { editor: Editor; view: Editor["view"] }) => view.hasFocus() && editor.isActive("link");
+const LINK_MENU_OPTIONS = { strategy: "fixed", placement: "bottom-start", offset: 6, flip: true, shift: { padding: 8 } } as const;
+
+/** 커서가 링크 안에 있을 때 뜨는 말풍선: 열기 / 수정 / 해제 */
+function LinkMenu({ editor, onOpen }: { editor: Editor; onOpen: (href: string) => void }) {
+  const href = useEditorState({ editor, selector: ({ editor: e }) => (e.isActive("link") ? String(e.getAttributes("link").href ?? "") : "") });
+  if (!href) return null;
+  const app = typeof window !== "undefined" ? parseAppLink(new URL(href, window.location.origin).href, window.location.origin) : null;
+  const label = app?.documentId ? (app.at ? "문서 위치 링크" : app.page ? `문서 링크 · ${app.page}쪽` : "문서 링크") : href.replace(/^https?:\/\//, "");
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 text-xs shadow-lg" data-testid="link-menu">
+      <span className="max-w-[14rem] truncate px-1.5 text-gray-500" title={href}>
+        {label}
+      </span>
+      <button type="button" onMouseDown={keep} onClick={() => onOpen(href)} className="btn-primary btn-sm">
+        <ExternalLink className="h-3.5 w-3.5" />
+        열기
+      </button>
+      <button type="button" onMouseDown={keep} onClick={() => editLink(editor)} className="btn-ghost btn-sm">
+        수정
+      </button>
+      <button type="button" onMouseDown={keep} onClick={() => editor.chain().focus().extendMarkRange("link").unsetLink().run()} className="btn-ghost btn-sm">
+        해제
+      </button>
+    </div>
+  );
+}
+
 // ---------------- 접속자 / 동기화 상태 ----------------
 
 function Collaborators() {
@@ -276,7 +318,7 @@ function SyncBadge({ saving, savedAt, error }: { saving: boolean; savedAt: strin
 
 // ---------------- 편집기 ----------------
 
-function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, storage }: Omit<Props, "roomId">) {
+function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSavedAt, snapshots, storage }: Omit<Props, "roomId">) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(lastSavedAt);
@@ -287,6 +329,8 @@ function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, 
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const clearToast = useCallback(() => setToast(null), []);
 
   const liveblocks = useLiveblocksExtension({ comments: false, mentions: false });
 
@@ -317,6 +361,7 @@ function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, 
     TaskList,
     TaskItem.configure({ nested: true }),
     Placeholder.configure({ placeholder: "여기에 내용을 입력하세요. 팀원이 같은 문서를 열면 함께 편집됩니다." }),
+    PositionLinks,
   ]);
   const [editorProps] = useState(() => ({ attributes: { class: "bx-editor", "aria-label": "문서 본문", "data-testid": "editor" } }));
 
@@ -335,6 +380,66 @@ function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, 
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  /** 문서 안 위치(from~to) 링크 복사 */
+  const copyPositionLink = useCallback(
+    async (from: number, to = from) => {
+      const ed = editorRef.current;
+      if (!ed) return;
+      const code = encodePosition(ed.state, from, to);
+      if (!code) return setToast("아직 동기화 중입니다. 잠시 후 다시 시도하세요.");
+      const result = await shareOrCopy({ title, url: absoluteUrl(documentPath(documentId, { at: code })), detail: describePosition(ed.state.doc, from, to) });
+      if (result === "copied") setToast("이 위치로 바로 가는 링크를 복사했습니다.");
+    },
+    [documentId, title],
+  );
+
+  const openLink = useCallback(
+    (href: string) => {
+      let url: URL;
+      try {
+        url = new URL(href, window.location.origin);
+      } catch {
+        return;
+      }
+      if (url.origin === window.location.origin) router.push(`${url.pathname}${url.search}${url.hash}`);
+      else if (url.protocol === "https:" || url.protocol === "http:") window.open(url.href, "_blank", "noopener,noreferrer");
+    },
+    [router],
+  );
+
+  // 제목 옆 🔗 버튼, Ctrl(⌘)+클릭한 링크
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const onCopy = (e: Event) => void copyPositionLink(Number((e as CustomEvent).detail));
+    const onOpen = (e: Event) => openLink(String((e as CustomEvent).detail));
+    dom.addEventListener(COPY_POSITION_EVENT, onCopy);
+    dom.addEventListener(OPEN_LINK_EVENT, onOpen);
+    return () => {
+      dom.removeEventListener(COPY_POSITION_EVENT, onCopy);
+      dom.removeEventListener(OPEN_LINK_EVENT, onOpen);
+    };
+  }, [editor, copyPositionLink, openLink]);
+
+  // 공유받은 위치 링크로 열었으면 동기화가 끝난 뒤 그 위치로 이동 + 강조
+  useEffect(() => {
+    if (!editor || !focusAt) return;
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const attempt = () => {
+      const target = decodePosition(editor.state, focusAt);
+      if (!target) {
+        if (++tries < 60) timer = setTimeout(attempt, 150);
+        else setToast("공유된 위치를 찾지 못했습니다.");
+        return;
+      }
+      showTarget(editor.view, target);
+      setToast(target.changed ? "공유된 위치의 내용이 바뀌어 가장 가까운 위치로 이동했습니다." : "공유된 위치로 이동했습니다.");
+    };
+    timer = setTimeout(attempt, 0);
+    return () => clearTimeout(timer);
+  }, [editor, focusAt]);
 
   // 새 문서의 첫 내용(템플릿/Word 불러오기)을 서버 동기화가 끝난 뒤 한 번만 넣음 (여러 명이 동시에 열어도 중복 없음)
   useEffect(() => {
@@ -475,14 +580,28 @@ function CollaborativeEditor({ documentId, initialHtml, lastSavedAt, snapshots, 
       )}
 
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.06)]">
-        {editor ? <Toolbar editor={editor} onImage={() => imageInput.current?.click()} /> : <div className="h-11 border-b border-gray-200" />}
+        {editor ? (
+          <Toolbar
+            editor={editor}
+            onImage={() => imageInput.current?.click()}
+            onCopyPositionLink={() => void copyPositionLink(editor.state.selection.from, editor.state.selection.to)}
+          />
+        ) : (
+          <div className="h-11 border-b border-gray-200" />
+        )}
         <div className="bg-gray-50/60 px-2 py-4 sm:px-6 sm:py-8">
           <div className="mx-auto min-h-[60vh] max-w-[820px] bg-white px-5 py-6 shadow-sm ring-1 ring-gray-200/70 sm:px-12 sm:py-10">
             <EditorContent editor={editor} />
+            {editor && (
+              <BubbleMenu editor={editor} pluginKey="bxLinkMenu" shouldShow={showLinkMenu} options={LINK_MENU_OPTIONS}>
+                <LinkMenu editor={editor} onOpen={openLink} />
+              </BubbleMenu>
+            )}
           </div>
         </div>
       </div>
       <input ref={imageInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden" onChange={(e) => insertImage(e.target.files?.[0])} />
+      <Toast message={toast} onDone={clearToast} />
     </div>
   );
 }

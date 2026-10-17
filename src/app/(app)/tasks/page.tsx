@@ -5,12 +5,14 @@ import { CheckCircle2, Circle, ExternalLink, FileText, LayoutGrid, List, Users, 
 import { db } from "@/db";
 import { documents, tasks } from "@/db/schema";
 import { ConfirmButton, NotifyAfterSubmit } from "@/components/form-controls";
+import { LinkChips } from "@/components/linked-text";
 import { EmptyState } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { TASK_STATUSES, optionColor, optionLabel } from "@/lib/constants";
 import { listTasks } from "@/lib/data";
 import { daysAgo } from "@/lib/dates";
-import { memberOptions, projectOptions } from "@/lib/queries";
+import { linkedDocumentTitles, memberOptions, projectOptions } from "@/lib/queries";
+import { siteOrigin } from "@/lib/site";
 import { DUE_TONE_CLASS, dueInfo } from "@/lib/task-utils";
 import { cn, isUuid } from "@/lib/utils";
 import { createTask, deleteTask, toggleTaskDone, updateTask } from "./actions";
@@ -48,6 +50,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
     isUuid(sp.task) ? db.select().from(tasks).where(eq(tasks.id, sp.task)).limit(1) : Promise.resolve([]),
   ]);
   const selectedTask = selected[0];
+  const origin = await siteOrigin();
+  const descTitles = selectedTask?.description ? await linkedDocumentTitles([selectedTask.description], origin) : {};
 
   const boardTasks: BoardTask[] = rows.map((t) => ({
     id: t.id,
@@ -216,6 +220,7 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
                     )}
                   </div>
                 )}
+                <LinkChips text={selectedTask.description} origin={origin} titles={descTitles} />
                 <TaskForm
                   key={selectedTask.id}
                   action={updateTask.bind(null, selectedTask.id)}
