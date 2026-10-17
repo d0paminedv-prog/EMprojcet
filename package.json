@@ -1,0 +1,62 @@
+{
+  "name": "brand-experience-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "브랜드 체험마케팅 5인 팀 협업도구 — 실시간 문서(Word 호환), 태스크 보드, 프로젝트·일정, Figma 연동",
+  "scripts": {
+    "dev": "node scripts/migrate.mjs && next dev",
+    "build": "node scripts/migrate.mjs && next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@electric-sql/pglite": "^0.5.10",
+    "@liveblocks/client": "^3.24.3",
+    "@liveblocks/node": "^3.24.3",
+    "@liveblocks/react": "^3.24.3",
+    "@liveblocks/react-tiptap": "^3.24.3",
+    "@liveblocks/react-ui": "^3.24.3",
+    "@next/env": "^16.4.2",
+    "@tiptap/core": "^3.32.0",
+    "@tiptap/extension-highlight": "^3.32.0",
+    "@tiptap/extension-image": "^3.32.0",
+    "@tiptap/extension-list": "^3.32.0",
+    "@tiptap/extension-table": "^3.32.0",
+    "@tiptap/extension-text-align": "^3.32.0",
+    "@tiptap/extensions": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
+    "@tiptap/suggestion": "^3.32.0",
+    "@vercel/blob": "^2.8.2",
+    "docx": "^9.11.0",
+    "drizzle-orm": "^0.45.4",
+    "lucide-react": "^1.58.0",
+    "mammoth": "^1.13.0",
+    "next": "16.4.2",
+    "postgres": "^3.4.9",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "yjs": "^13.6.33",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.0",
+    "eslint-config-next": "16.4.2",
+    "liveblocks": "^1.9.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3"
+  }
+}

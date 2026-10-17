@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+    "Malgun Gothic", "맑은 고딕", "Segoe UI", sans-serif;
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1;
+  --color-brand-600: #4f46e5;
+  --color-brand-700: #4338ca;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: #f6f7fb;
+  color: #111827;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap bg-brand-600 text-white hover:bg-brand-700;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap border border-gray-200 bg-white text-gray-700 hover:bg-gray-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap text-gray-600 hover:bg-gray-100;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap border border-red-200 bg-white text-red-600 hover:bg-red-50;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .input {
+    @apply block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-gray-700;
+  }
+  .card {
+    @apply rounded-xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)];
+  }
+  .card-title {
+    @apply text-sm font-semibold text-gray-900;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+  .prose-minutes li {
+    @apply leading-relaxed;
+  }
+}
+
+/* ---------- 실시간 문서 편집기 (Word 스타일) ---------- */
+.bx-editor {
+  outline: none;
+  font-size: 15px;
+  line-height: 1.75;
+  color: #111827;
+  min-height: 50vh;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.bx-editor > * + * {
+  margin-top: 0.6em;
+}
+.bx-editor h1 {
+  font-size: 1.75em;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 1.2em;
+}
+.bx-editor h2 {
+  font-size: 1.35em;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 1.2em;
+  color: #1f2937;
+}
+.bx-editor h3 {
+  font-size: 1.12em;
+  font-weight: 600;
+  margin-top: 1em;
+}
+.bx-editor > :first-child {
+  margin-top: 0;
+}
+.bx-editor ul,
+.bx-editor ol {
+  padding-left: 1.5em;
+}
+.bx-editor ul {
+  list-style: disc;
+}
+.bx-editor ol {
+  list-style: decimal;
+}
+.bx-editor li > p {
+  margin: 0.15em 0;
+}
+.bx-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0.2em;
+}
+.bx-editor ul[data-type="taskList"] li {
+  display: flex;
+  gap: 0.5em;
+  align-items: flex-start;
+}
+.bx-editor ul[data-type="taskList"] li > label {
+  margin-top: 0.3em;
+  user-select: none;
+}
+.bx-editor ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+.bx-editor ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: #9ca3af;
+  text-decoration: line-through;
+}
+.bx-editor blockquote {
+  border-left: 3px solid #c7d2fe;
+  padding-left: 1em;
+  color: #4b5563;
+}
+.bx-editor hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 1.5em 0;
+}
+.bx-editor a {
+  color: #4f46e5;
+  text-decoration: underline;
+}
+.bx-editor mark {
+  background: #fef08a;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.bx-editor img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+.bx-editor img.ProseMirror-selectednode {
+  outline: 3px solid #a5b4fc;
+}
+.bx-editor table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  margin: 0.8em 0;
+}
+.bx-editor th,
+.bx-editor td {
+  border: 1px solid #d1d5db;
+  padding: 6px 8px;
+  vertical-align: top;
+  position: relative;
+}
+.bx-editor th {
+  background: #f3f4f6;
+  font-weight: 600;
+  text-align: left;
+}
+.bx-editor td > p,
+.bx-editor th > p {
+  margin: 0;
+}
+.bx-editor .selectedCell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(99, 102, 241, 0.12);
+  pointer-events: none;
+}
+.bx-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #9ca3af;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+.bx-editor .collaboration-carets__label {
+  font-size: 11px;
+  font-family: inherit;
+}
