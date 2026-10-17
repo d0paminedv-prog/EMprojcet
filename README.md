@@ -46,6 +46,9 @@
 
 > 입장 코드를 바꾸려면 `ENTRY_CODE`를 수정하고 재배포하세요. 모든 팀원이 새 코드로 다시 입장하게 됩니다.
 
+> **빌드 오류 "No Output Directory named "public" found"** 가 나오면, Vercel 프로젝트를 빈 저장소로 먼저 만들어서 Framework Preset 이 "Other" 로 잡힌 경우입니다.
+> 저장소의 `vercel.json` 이 Next.js 로 고정해 주며, 그래도 나오면 **Settings → Build and Deployment → Framework Preset** 을 **Next.js** 로 바꾸고 Output Directory 덮어쓰기(Override)를 끈 뒤 재배포하세요.
+
 ## 로컬 실행
 
 ```bash
