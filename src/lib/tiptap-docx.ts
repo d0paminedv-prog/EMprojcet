@@ -11,6 +11,7 @@ import {
   ShadingType,
   Table,
   TableCell,
+  TableLayoutType,
   TableRow,
   TextRun,
   WidthType,
@@ -27,6 +28,34 @@ export type ImageLoader = (src: string) => Promise<ImageData | null>;
 const FONT = { ascii: "Malgun Gothic", hAnsi: "Malgun Gothic", eastAsia: "맑은 고딕", cs: "Malgun Gothic" };
 const BORDER = { style: BorderStyle.SINGLE, size: 4, color: "BFC5CE" };
 const MAX_IMAGE_WIDTH = 600;
+/** A4 본문 너비 (twip = 1/20pt, 1px ≈ 15twip) */
+const CONTENT_WIDTH_TWIPS = 11906 - 1100 * 2;
+
+/** 편집기 페이지의 표 너비(px) — 너비를 지정하지 않은 열이 나눠 갖는 기준 */
+const EDITOR_TABLE_WIDTH = 724;
+
+/**
+ * 편집기에서 조절한 표 열 너비(px). 조절한 열이 하나도 없으면 null (페이지 너비에 균등 분배).
+ * 일부만 조절했으면 나머지 열은 편집기 화면처럼 남은 너비를 똑같이 나눠 가짐.
+ */
+export function columnWidthsPx(table: PMNode): number[] | null {
+  const firstRow = table.content?.[0];
+  if (!firstRow?.content?.length) return null;
+  const widths: (number | null)[] = [];
+  for (const cell of firstRow.content) {
+    const span = Number(cell.attrs?.colspan ?? 1) || 1;
+    const colwidth = Array.isArray(cell.attrs?.colwidth) ? (cell.attrs.colwidth as unknown[]) : [];
+    for (let i = 0; i < span; i++) {
+      const w = Number(colwidth[i]);
+      widths.push(Number.isFinite(w) && w > 0 ? w : null);
+    }
+  }
+  if (widths.every((w) => w === null)) return null;
+  const known = widths.reduce<number>((sum, w) => sum + (w ?? 0), 0);
+  const unknown = widths.filter((w) => w === null).length;
+  const fill = unknown ? Math.max(48, (EDITOR_TABLE_WIDTH - known) / unknown) : 0;
+  return widths.map((w) => w ?? fill);
+}
 
 const HEADINGS = {
   1: HeadingLevel.HEADING_1,
@@ -166,7 +195,19 @@ class Converter {
       }
       if (cells.length) rows.push(new TableRow({ children: cells }));
     }
-    return new Table({ rows: rows.length ? rows : [new TableRow({ children: [new TableCell({ children: [new Paragraph("")] })] })], width: { size: 100, type: WidthType.PERCENTAGE } });
+    const body = rows.length ? rows : [new TableRow({ children: [new TableCell({ children: [new Paragraph("")] })] })];
+    const px = columnWidthsPx(node);
+    if (!px) return new Table({ rows: body, width: { size: 100, type: WidthType.PERCENTAGE } });
+    // 조절한 열 너비 유지 (페이지보다 넓으면 비율대로 줄임)
+    const total = px.reduce((a, b) => a + b, 0) * 15;
+    const scale = total > CONTENT_WIDTH_TWIPS ? CONTENT_WIDTH_TWIPS / total : 1;
+    const columnWidths = px.map((w) => Math.round(w * 15 * scale));
+    return new Table({
+      rows: body,
+      columnWidths,
+      layout: TableLayoutType.FIXED,
+      width: { size: columnWidths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+    });
   }
 
   async block(node: PMNode): Promise<(Paragraph | Table)[]> {

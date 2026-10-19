@@ -67,10 +67,18 @@ export function decodePosition(state: EditorState, code: string): ResolvedPositi
   }
   const size = state.doc.content.size;
   const clamp = (n: number) => Math.max(0, Math.min(size, n));
-  const abs = rels.map((rel) => relativePositionToAbsolutePosition(y.doc, y.type, rel, y.binding.mapping));
+  // 코드가 이상해도(다른 팀원이 만든 링크·코멘트) 편집기가 멈추지 않도록 위치를 못 찾은 것으로 처리
+  const resolve = (rel: Y.RelativePosition): number | null => {
+    try {
+      return relativePositionToAbsolutePosition(y.doc, y.type, rel, y.binding.mapping);
+    } catch {
+      return null;
+    }
+  };
+  const abs = rels.map(resolve);
   if (abs[0] == null) {
     // 글이 통째로 지워짐 → 소속 제목, 그것도 없으면 문서 맨 앞
-    const heading = fallback ? relativePositionToAbsolutePosition(y.doc, y.type, fallback, y.binding.mapping) : null;
+    const heading = fallback ? resolve(fallback) : null;
     const pos = clamp(heading ?? 1);
     return { from: pos, to: pos, changed: true };
   }
@@ -96,6 +104,30 @@ export function describePosition(doc: PMNode, from: number, to = from): string {
     if ($pos.node(d).isTextblock) return clip($pos.node(d).textContent);
   }
   return "";
+}
+
+/** pos 가 속한 곳의 제목 (pos 앞쪽에서 가장 가까운 제목, 제목 안이면 그 제목) */
+export function sectionTitleAt(doc: PMNode, pos: number): string | null {
+  let title: string | null = null;
+  doc.nodesBetween(0, Math.min(Math.max(pos, 1), doc.content.size), (node) => {
+    if (node.type.name === "heading") {
+      title = clip(node.textContent, 30) || null;
+      return false;
+    }
+    return true;
+  });
+  return title;
+}
+
+/** pos 가 화면 밖에 있을 때만 화면 위쪽 1/3 지점으로 부드럽게 스크롤 */
+export function scrollToPos(view: { coordsAtPos: (pos: number) => { top: number; bottom: number } }, pos: number, onlyIfNeeded = true) {
+  try {
+    const { top, bottom } = view.coordsAtPos(pos);
+    if (onlyIfNeeded && top > 80 && bottom < window.innerHeight - 80) return;
+    window.scrollTo({ top: Math.max(0, window.scrollY + top - window.innerHeight / 3), behavior: "smooth" });
+  } catch {
+    // 위치를 화면 좌표로 바꾸지 못하면 생략
+  }
 }
 
 // ---------------- 열린 위치 강조 ----------------

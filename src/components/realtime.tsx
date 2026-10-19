@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LiveblocksProvider, RoomProvider, useBroadcastEvent, useEventListener, useOthers, useSelf, useUpdateMyPresence } from "@liveblocks/react";
 import { PenLine } from "lucide-react";
-import { describeActivity, EMPTY_PRESENCE, IDLE_MS, isAppPath, pickPresence, screenTitle, stayLabel, type TeamPresence } from "@/lib/presence";
+import { describeActivity, EMPTY_PRESENCE, IDLE_MS, pickPresence, presenceHref, screenTitle, stayLabel, type TeamPresence } from "@/lib/presence";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./ui";
 
@@ -30,6 +30,13 @@ const ACTIVITY_EVENT = "bx:activity";
 /** 지금 하는 일을 팀원에게 실시간으로 알림 (null 이면 해제). 예) "파일 3개 올리는 중" */
 export function announceActivity(text: string | null) {
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(ACTIVITY_EVENT, { detail: text }));
+}
+
+const LOCATION_EVENT = "bx:location";
+
+/** 실시간 문서 안 내 위치를 팀원에게 알림 — 사이드바 활동에 「› 3. 타깃」처럼 표시되고 누르면 그 위치로 이동 */
+export function announceLocation(location: { at: string | null; section: string | null }) {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(LOCATION_EVENT, { detail: location }));
 }
 
 function BroadcastBridge() {
@@ -66,7 +73,7 @@ function PresenceTracker() {
     title.current = screenTitle(document.title);
     clearTimeout(typing.current.timer);
     typing.current.on = false;
-    update({ page: pathname, title: title.current, since: Date.now(), typing: false });
+    update({ page: pathname, title: title.current, since: Date.now(), typing: false, at: null, section: null });
     const observer = new MutationObserver(() => {
       const next = screenTitle(document.title);
       if (next !== title.current) update({ title: (title.current = next) });
@@ -118,11 +125,16 @@ function PresenceTracker() {
     };
   }, [update]);
 
-  // 업로드 등 직접 알린 작업
+  // 업로드 등 직접 알린 작업, 문서 안 위치
   useEffect(() => {
     const onActivity = (e: Event) => update({ doing: ((e as CustomEvent).detail as string | null) ?? null });
+    const onLocation = (e: Event) => update((e as CustomEvent<{ at: string | null; section: string | null }>).detail);
     window.addEventListener(ACTIVITY_EVENT, onActivity);
-    return () => window.removeEventListener(ACTIVITY_EVENT, onActivity);
+    window.addEventListener(LOCATION_EVENT, onLocation);
+    return () => {
+      window.removeEventListener(ACTIVITY_EVENT, onActivity);
+      window.removeEventListener(LOCATION_EVENT, onLocation);
+    };
   }, [update]);
 
   return null;
@@ -162,7 +174,8 @@ export function TeamRealtimeProvider({
   }
   return (
     <RealtimeContext.Provider value={value}>
-      <LiveblocksProvider authEndpoint="/api/liveblocks-auth" baseUrl={baseUrl} throttle={80}>
+      {/* preventUnsavedChanges: 아직 서버에 반영되지 않은 편집이 있으면 창을 닫기 전에 경고 */}
+      <LiveblocksProvider authEndpoint="/api/liveblocks-auth" baseUrl={baseUrl} throttle={80} preventUnsavedChanges>
         <RoomProvider id={TEAM_ROOM} initialPresence={EMPTY_PRESENCE}>
           <RefreshOnChange />
           <BroadcastBridge />
@@ -237,8 +250,8 @@ function ActivityList({ members, onNavigate }: { members: OnlineMember[]; onNavi
         );
         return (
           <li key={m.id}>
-            {isAppPath(m.presence.page) ? (
-              <Link href={m.presence.page} onClick={onNavigate} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50" title={`${m.name}님이 있는 화면으로 이동`}>
+            {presenceHref(m.presence) ? (
+              <Link href={presenceHref(m.presence)!} onClick={onNavigate} className="flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50" title={`${m.name}님이 있는 화면으로 이동`}>
                 {row}
               </Link>
             ) : (
