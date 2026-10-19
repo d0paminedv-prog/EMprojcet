@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import pdfmake from "pdfmake";
+import { normalizeColor } from "./colors";
 import { columnWidthsPx, type ImageLoader, type PMNode } from "./tiptap-docx";
 
 /** Tiptap(ProseMirror) JSON → PDF (한글: Noto Sans KR, assets/fonts 의 OFL 글꼴) */
@@ -111,7 +112,9 @@ class Converter {
           stack: stack.length ? stack : [" "],
           ...(colSpan > 1 ? { colSpan } : {}),
           ...(rowSpan > 1 ? { rowSpan } : {}),
-          ...(header ? { fillColor: "#f3f4f6", bold: true } : {}),
+          // 색 채우기 > 머리글 기본 회색
+          ...(normalizeColor(cell.attrs?.backgroundColor) || header ? { fillColor: normalizeColor(cell.attrs?.backgroundColor) ?? "#f3f4f6" } : {}),
+          ...(header ? { bold: true } : {}),
         });
         for (let dr = 0; dr < rowSpan; dr++) {
           occupied[r + dr] ??= [];

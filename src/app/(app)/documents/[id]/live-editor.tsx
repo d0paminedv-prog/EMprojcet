@@ -41,6 +41,7 @@ import {
   MapPin,
   MessageSquarePlus,
   Minus,
+  PaintBucket,
   Quote,
   Redo2,
   Rows3,
@@ -57,12 +58,14 @@ import { absoluteUrl, shareOrCopy, Toast } from "@/components/share-link";
 import { clip, documentPath, parseAppLink } from "@/lib/links";
 import { EMPTY_PRESENCE } from "@/lib/presence";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
+import { CELL_COLORS } from "@/lib/colors";
 import { MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { cn, formatBytes } from "@/lib/utils";
 import { createAsset, createSnapshot, getSnapshotContent, saveLiveContent } from "../live-actions";
 import { emit, FOCUS_ANCHOR_EVENT, NEW_COMMENT_EVENT, type FocusAnchorDetail, type NewCommentDetail } from "./comment-events";
 import { CommentMarks, setCommentAnchors, type CommentAnchor } from "./comment-marks";
 import { IMAGE_FILES_EVENT, ImagePasteDrop, type ImageFilesDetail } from "./editor-images";
+import { ColoredTableCell, ColoredTableHeader } from "./table-colors";
 import {
   COPY_POSITION_EVENT,
   decodePosition,
@@ -169,6 +172,96 @@ function Sep() {
   return <span className="mx-0.5 h-5 w-px shrink-0 bg-gray-200" />;
 }
 
+/** 표 셀 색 채우기 — 지금 칸 또는 끌어서 선택한 여러 칸에 배경색 */
+function CellColorPicker({ editor, current }: { editor: Editor; current: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [alignRight, setAlignRight] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    // 바깥을 누르거나 Esc 를 누르면 닫힘
+    const close = (e: PointerEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const apply = (color: string | null) => {
+    editor.chain().focus().setCellAttribute("backgroundColor", color).run();
+    setOpen(false);
+  };
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+
+  return (
+    <div ref={boxRef} className="relative">
+      <ToolButton
+        label="셀 색 채우기"
+        active={open}
+        onClick={() => {
+          // 화면 오른쪽에 있으면 팔레트를 왼쪽으로 펼쳐 잘리지 않게
+          const rect = boxRef.current?.getBoundingClientRect();
+          setAlignRight(!!rect && rect.left > window.innerWidth / 2);
+          setOpen((v) => !v);
+        }}
+      >
+        <span className="flex flex-col items-center">
+          <PaintBucket className="h-4 w-4" />
+          <span className={cn("mt-0.5 h-1 w-4 rounded-sm", !current && "border border-gray-300")} style={current ? { backgroundColor: current } : undefined} />
+        </span>
+      </ToolButton>
+      {open && (
+        <div
+          className={cn("absolute top-full z-30 mt-1 w-60 rounded-lg border border-gray-200 bg-white p-2 shadow-lg", alignRight ? "right-0" : "left-0")}
+          role="dialog"
+          aria-label="셀 색 채우기"
+          data-testid="cell-color-palette"
+        >
+          <div className="grid grid-cols-9 gap-1">
+            {CELL_COLORS.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                onMouseDown={keep}
+                onClick={() => apply(c.value)}
+                title={c.label}
+                aria-label={`${c.label} 채우기`}
+                className={cn("h-5 w-5 rounded border border-black/10 hover:scale-110", current === c.value && "ring-2 ring-brand-500 ring-offset-1")}
+                style={{ backgroundColor: c.value }}
+              />
+            ))}
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2 text-xs">
+            <button type="button" onMouseDown={keep} onClick={() => apply(null)} className="btn-ghost btn-sm">
+              색 없음
+            </button>
+            <label className="flex items-center gap-1.5 text-gray-600">
+              직접 선택
+              {/* 색을 고르는 동안 편집기 선택(칸)이 유지되도록 포커스를 옮기지 않고 적용 */}
+              <input
+                type="color"
+                value={current ?? "#fef9c3"}
+                onChange={(e) => editor.chain().setCellAttribute("backgroundColor", e.target.value).run()}
+                className="h-6 w-8 cursor-pointer rounded border border-gray-200 bg-white p-0"
+                aria-label="직접 색 선택"
+              />
+            </label>
+          </div>
+          <p className="mt-1.5 text-[11px] text-gray-400">여러 칸을 끌어서 선택하면 한 번에 채울 수 있어요</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: Editor; onImage: () => void; onCopyPositionLink: () => void; onComment: () => void }) {
   const s = useEditorState({
     editor,
@@ -188,6 +281,7 @@ function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: E
       center: e.isActive({ textAlign: "center" }),
       right: e.isActive({ textAlign: "right" }),
       table: e.isActive("table"),
+      cellColor: ((e.getAttributes("tableCell").backgroundColor ?? e.getAttributes("tableHeader").backgroundColor) as string | null | undefined) ?? null,
       canUndo: e.can().undo(),
       canRedo: e.can().redo(),
     }),
@@ -284,6 +378,7 @@ function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: E
           <ToolButton label="열 삭제" onClick={() => chain().deleteColumn().run()}>
             <span className="text-[11px] font-semibold">열−</span>
           </ToolButton>
+          <CellColorPicker editor={editor} current={s.cellColor} />
           <ToolButton label="열 너비 균등하게" onClick={() => resetColumnWidths(editor)}>
             <span className="text-[11px] font-semibold">↔</span>
           </ToolButton>
@@ -517,7 +612,10 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
     liveblocks,
     StarterKit.configure({ undoRedo: false, link: { openOnClick: false, autolink: true } }),
     // 열 경계를 끌어 너비 조절 (너비는 표 안에 저장되어 팀원에게 실시간 반영)
-    TableKit.configure({ table: { resizable: true, cellMinWidth: 48 } }),
+    TableKit.configure({ table: { resizable: true, cellMinWidth: 48 }, tableCell: false, tableHeader: false }),
+    // 셀 색 채우기(배경색) 속성을 더한 표 칸
+    ColoredTableCell,
+    ColoredTableHeader,
     Image,
     Highlight,
     TextAlign.configure({ types: ["heading", "paragraph"] }),
