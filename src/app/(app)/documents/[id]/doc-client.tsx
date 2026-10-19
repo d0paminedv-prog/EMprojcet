@@ -1,14 +1,13 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PenLine, Upload } from "lucide-react";
-import { FormError, SubmitButton } from "@/components/form-controls";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES, MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { notifyChange } from "@/components/realtime";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { fileExtension, formatBytes, type ActionState } from "@/lib/utils";
-import { addComment, addDocumentVersion } from "../actions";
+import { addDocumentVersion, renameDocument } from "../actions";
 import { makeDocumentEditable } from "../live-actions";
 
 export function VersionUploader({
@@ -99,52 +98,61 @@ export function MakeEditableButton({ documentId, fileName }: { documentId: strin
   );
 }
 
-export function CommentForm({ documentId }: { documentId: string }) {
-  const formRef = useRef<HTMLFormElement>(null);
-  const [state, action] = useActionState(async (prev: ActionState, form: FormData) => {
-    const result = await addComment(documentId, prev, form);
-    if (result?.ok) formRef.current?.reset();
-    return result;
-  }, undefined);
-  return (
-    <form ref={formRef} action={action} className="space-y-2">
-      <textarea name="body" rows={3} required className="input" placeholder="검토 의견, 수정 요청 등을 남겨 주세요" />
-      <div className="flex items-center justify-between gap-2">
-        <FormError state={state?.error ? state : undefined} />
-        <SubmitButton className="btn-primary btn-sm ml-auto" pendingText="등록 중…">
-          의견 등록
-        </SubmitButton>
-      </div>
-    </form>
-  );
-}
-
+/** 문서 정보 — 바꾸면 자동 저장 (목록은 바로, 글은 입력을 멈추면) */
 export function DocumentEditForm({
   action,
   doc,
   projects,
 }: {
   action: (prev: ActionState, form: FormData) => Promise<ActionState>;
-  doc: { title: string; kind: string; url: string | null; category: string; description: string; projectId: string | null };
+  doc: { kind: string; url: string | null; category: string; description: string; projectId: string | null };
   projects: { id: string; name: string }[];
 }) {
-  const [state, formAction] = useActionState(action, undefined);
+  const [state, formAction, pending] = useActionState(action, undefined);
+  const formRef = useRef<HTMLFormElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 폼 제출(<form action>)로 보내면 React 가 저장 뒤 입력칸을 처음 값으로 되돌리므로, 폼 값을 직접 모아 보냄
+  const saveSoon = (delay: number) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      const form = formRef.current;
+      if (form) startTransition(() => formAction(new FormData(form)));
+    }, delay);
+  };
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  useEffect(() => {
+    if (state?.ok) notifyChange("documents");
+  }, [state]);
+
   return (
-    <form action={formAction} className="space-y-3">
-      <div>
-        <label className="label">제목</label>
-        <input name="title" className="input" defaultValue={doc.title} required />
-      </div>
+    <form
+      ref={formRef}
+      onSubmit={(e) => {
+        e.preventDefault();
+        saveSoon(0);
+      }}
+      className="space-y-3"
+      onChange={(e) => saveSoon(e.target instanceof HTMLSelectElement ? 0 : 900)}
+      // 입력칸을 벗어나면 기다리지 않고 바로 저장
+      onBlur={() => timer.current && saveSoon(0)}
+      data-testid="doc-info-form"
+    >
       {(doc.kind === "figma" || doc.kind === "link") && (
         <div>
-          <label className="label">{doc.kind === "figma" ? "Figma 링크" : "URL"}</label>
-          <input name="url" type="url" className="input" defaultValue={doc.url ?? ""} required />
+          <label className="label" htmlFor="doc-url">
+            {doc.kind === "figma" ? "Figma 링크" : "URL"}
+          </label>
+          <input id="doc-url" name="url" type="url" className="input" defaultValue={doc.url ?? ""} required />
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className="label">프로젝트</label>
-          <select name="projectId" className="input" defaultValue={doc.projectId ?? ""}>
+          <label className="label" htmlFor="doc-project">
+            프로젝트
+          </label>
+          <select id="doc-project" name="projectId" className="input" defaultValue={doc.projectId ?? ""}>
             <option value="">공통 (프로젝트 없음)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>
@@ -154,8 +162,10 @@ export function DocumentEditForm({
           </select>
         </div>
         <div>
-          <label className="label">분류</label>
-          <select name="category" className="input" defaultValue={doc.category}>
+          <label className="label" htmlFor="doc-category">
+            분류
+          </label>
+          <select id="doc-category" name="category" className="input" defaultValue={doc.category}>
             {DOC_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
@@ -165,13 +175,99 @@ export function DocumentEditForm({
         </div>
       </div>
       <div>
-        <label className="label">설명</label>
-        <textarea name="description" rows={3} className="input" defaultValue={doc.description} />
+        <label className="label" htmlFor="doc-description">
+          설명
+        </label>
+        <textarea id="doc-description" name="description" rows={3} className="input" defaultValue={doc.description} />
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <FormError state={state} />
-        <SubmitButton className="btn-primary btn-sm ml-auto">저장</SubmitButton>
-      </div>
+      <p className="min-h-4 text-xs" aria-live="polite" data-testid="doc-info-status">
+        {pending ? (
+          <span className="text-gray-500">저장 중…</span>
+        ) : state?.error ? (
+          <span className="text-red-600">{state.error}</span>
+        ) : state?.message ? (
+          <span className="text-emerald-600">{state.message}</span>
+        ) : (
+          <span className="text-gray-400">바꾸면 자동으로 저장됩니다</span>
+        )}
+      </p>
     </form>
+  );
+}
+
+/** 문서 제목 — 눌러서 바로 고치고, 입력을 멈추면 자동 저장. 다른 팀원이 바꾼 제목도 바로 반영 */
+export function InlineTitle({ documentId, title }: { documentId: string; title: string }) {
+  const router = useRouter();
+  const [value, setValue] = useState(title);
+  const [synced, setSynced] = useState(title);
+  const [saved, setSaved] = useState(title);
+  const [editing, setEditing] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 다른 팀원이 바꾼 제목 반영 (내가 입력 중일 때는 덮어쓰지 않음)
+  if (title !== synced && !editing) {
+    setSynced(title);
+    setSaved(title);
+    setValue(title);
+  }
+
+  async function save(next: string) {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    const clean = next.replace(/\s+/g, " ").trim();
+    if (!clean || clean === saved) return;
+    setStatus("saving");
+    const result = await renameDocument(documentId, clean);
+    if (result.error || !result.title) {
+      setStatus("error");
+      setError(result.error ?? "제목을 저장하지 못했습니다.");
+      return;
+    }
+    setSaved(result.title);
+    setStatus("saved");
+    setError(null);
+    notifyChange("documents");
+    router.refresh();
+  }
+
+  return (
+    <span className="flex min-w-0 flex-1 flex-col">
+      <input
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          if (timer.current) clearTimeout(timer.current);
+          const next = e.target.value;
+          timer.current = setTimeout(() => void save(next), 700);
+        }}
+        onFocus={() => setEditing(true)}
+        onBlur={() => {
+          setEditing(false);
+          if (!value.trim()) setValue(saved);
+          else void save(value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setValue(saved);
+            if (timer.current) clearTimeout(timer.current);
+            timer.current = null;
+            requestAnimationFrame(() => (document.activeElement as HTMLElement | null)?.blur());
+          }
+        }}
+        maxLength={200}
+        aria-label="문서 제목 (입력하면 자동 저장)"
+        title="눌러서 제목 바꾸기 — 자동 저장"
+        className="-mx-1 w-full min-w-0 truncate rounded-md border border-transparent bg-transparent px-1 text-xl font-bold text-gray-900 hover:border-gray-200 focus:border-brand-300 focus:outline-none sm:text-2xl"
+        data-testid="doc-title-input"
+      />
+      <span className="h-4 text-[11px] font-normal" aria-live="polite">
+        {status === "saving" && <span className="text-gray-500">제목 저장 중…</span>}
+        {status === "saved" && <span className="text-emerald-600">제목 자동 저장됨</span>}
+        {status === "error" && <span className="text-red-600">{error}</span>}
+      </span>
+    </span>
   );
 }

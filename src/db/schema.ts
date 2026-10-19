@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -137,9 +138,17 @@ export const comments = pgTable(
       .references(() => documents.id, { onDelete: "cascade" }),
     authorId: uuid("author_id").references(() => members.id, { onDelete: "set null" }),
     body: text("body").notNull(),
+    /** 답글이면 원 코멘트 */
+    parentId: uuid("parent_id").references((): AnyPgColumn => comments.id, { onDelete: "cascade" }),
+    /** 실시간 문서 안 위치 코드 (선택한 글에 단 코멘트). 없으면 문서 전체 의견 */
+    anchor: text("anchor"),
+    /** 코멘트를 단 글 (앞부분) */
+    quote: text("quote"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by").references(() => members.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
-  (t) => [index("comments_doc_idx").on(t.documentId)],
+  (t) => [index("comments_doc_idx").on(t.documentId), index("comments_parent_idx").on(t.parentId)],
 );
 
 /** 팀원별 할 일(태스크) */

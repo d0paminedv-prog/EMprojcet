@@ -14,6 +14,10 @@ declare global {
       away: boolean;
       /** 이 화면에 들어온 시각 (ms) */
       since: number;
+      /** 실시간 문서 안 내 커서 위치 코드 (위치 링크와 같은 형식) */
+      at: string | null;
+      /** 커서가 있는 곳의 제목 (예: 3. 타깃) */
+      section: string | null;
     };
     UserMeta: { id: string; info: { name: string; color: string } };
     RoomEvent: { type: "changed"; scope: string };

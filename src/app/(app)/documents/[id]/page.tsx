@@ -2,14 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import mammoth from "mammoth";
-import { Download, ExternalLink, MessageSquare, Pencil, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Pencil } from "lucide-react";
 import { db } from "@/db";
 import { comments, documentSnapshots, documents, documentVersions, members, projects, type DocumentVersion } from "@/db/schema";
 import { ConfirmButton } from "@/components/form-controls";
 import { HereNow } from "@/components/realtime";
 import { DocIcon } from "@/components/lists";
-import { Avatar, Badge, Card, Dot, Notice } from "@/components/ui";
+import { Badge, Card, Dot, Notice } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { DOC_CATEGORIES, optionLabel } from "@/lib/constants";
 import { formatDateTime, formatRelative } from "@/lib/dates";
@@ -18,9 +19,9 @@ import { isEditableFile, previewKind } from "@/lib/mime";
 import { linkedDocumentTitles, projectOptions } from "@/lib/queries";
 import { readFileBuffer, storageClientConfig } from "@/lib/storage";
 import { figmaEmbedUrl, formatBytes, isUuid } from "@/lib/utils";
-import { deleteComment, deleteDocument, updateDocument } from "../actions";
-import { CommentForm, DocumentEditForm, MakeEditableButton, VersionUploader } from "./doc-client";
-import { LinkedText } from "@/components/linked-text";
+import { deleteDocument, updateDocument } from "../actions";
+import { CommentsPanel, type CommentView } from "./comments-panel";
+import { DocumentEditForm, InlineTitle, MakeEditableButton, VersionUploader } from "./doc-client";
 import { PdfPageLink, ShareLinkButton } from "@/components/share-link";
 import { isPositionCode, parsePageNumber } from "@/lib/links";
 import { siteOrigin } from "@/lib/site";
@@ -28,6 +29,9 @@ import { LiveEditor } from "./live-editor";
 import { after } from "next/server";
 import { docRoomId } from "@/lib/liveblocks";
 import { figmaConfigured, refreshFigmaDocs } from "@/lib/figma";
+
+/** 코멘트를 해결한 팀원 */
+const resolver = alias(members, "resolver");
 
 async function getDoc(id: string) {
   if (!isUuid(id)) return null;
@@ -133,9 +137,10 @@ export default async function DocumentPage({
       .where(eq(documentVersions.documentId, doc.id))
       .orderBy(desc(documentVersions.version)),
     db
-      .select({ comment: comments, authorName: members.name, authorColor: members.color })
+      .select({ comment: comments, authorName: members.name, authorColor: members.color, resolverName: resolver.name })
       .from(comments)
       .leftJoin(members, eq(members.id, comments.authorId))
+      .leftJoin(resolver, eq(resolver.id, comments.resolvedBy))
       .where(eq(comments.documentId, doc.id))
       .orderBy(asc(comments.createdAt)),
     projectOptions(),
@@ -163,40 +168,33 @@ export default async function DocumentPage({
     </div>
   );
 
+  // 코멘트 스레드 (원 코멘트 + 답글)
+  const toView = ({ comment, authorName, authorColor, resolverName }: (typeof commentRows)[number]): CommentView => ({
+    id: comment.id,
+    authorId: comment.authorId,
+    authorName: authorName ?? "알 수 없음",
+    authorColor: authorColor ?? "#9ca3af",
+    body: comment.body,
+    createdLabel: formatDateTime(comment.createdAt),
+    anchor: comment.anchor,
+    quote: comment.quote,
+    resolved: !!comment.resolvedAt,
+    resolvedByName: resolverName,
+    replies: [],
+  });
+  const threads = commentRows.filter((c) => !c.comment.parentId).map(toView);
+  const byId = new Map(threads.map((t) => [t.id, t]));
+  for (const c of commentRows) if (c.comment.parentId) byId.get(c.comment.parentId)?.replies.push(toView(c));
+
   const commentsCard = (
-    <Card title={<span className="flex items-center gap-1.5"><MessageSquare className="h-4 w-4" />의견 ({commentRows.length})</span>}>
-      <ul className="mb-4 space-y-4">
-        {commentRows.map(({ comment, authorName, authorColor }) => (
-          <li key={comment.id} className="flex gap-2.5">
-            <Avatar name={authorName ?? "?"} color={authorColor ?? "#9ca3af"} size="sm" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs text-gray-500">
-                <b className="font-medium text-gray-900">{authorName ?? "알 수 없음"}</b> · {formatDateTime(comment.createdAt)}
-              </p>
-              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-gray-800">
-                <LinkedText text={comment.body} origin={origin} titles={linkTitles} />
-              </p>
-            </div>
-            {comment.authorId === user.id && (
-              <form action={deleteComment.bind(null, comment.id)}>
-                <ConfirmButton message="의견을 삭제할까요?" className="btn-ghost btn-sm">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </ConfirmButton>
-              </form>
-            )}
-          </li>
-        ))}
-        {commentRows.length === 0 && <li className="text-sm text-gray-500">아직 의견이 없습니다.</li>}
-      </ul>
-      <CommentForm documentId={doc.id} />
-    </Card>
+    <CommentsPanel documentId={doc.id} currentUserId={user.id} threads={threads} origin={origin} linkTitles={linkTitles} live={doc.kind === "live"} />
   );
 
   const infoCard = (
-    <Card title={<span className="flex items-center gap-1.5"><Pencil className="h-3.5 w-3.5" />문서 정보 수정</span>}>
+    <Card title={<span className="flex items-center gap-1.5"><Pencil className="h-3.5 w-3.5" />문서 정보 (자동 저장)</span>}>
       <DocumentEditForm
         action={updateDocument.bind(null, doc.id)}
-        doc={{ title: doc.title, kind: doc.kind, url: doc.url, category: doc.category, description: doc.description, projectId: doc.projectId }}
+        doc={{ kind: doc.kind, url: doc.url, category: doc.category, description: doc.description, projectId: doc.projectId }}
         projects={projectList}
       />
       <form action={deleteDocument.bind(null, doc.id)} className="mt-4 border-t border-gray-100 pt-4">
@@ -223,7 +221,7 @@ export default async function DocumentPage({
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
               <DocIcon kind="live" />
-              <span className="truncate">{doc.title}</span>
+              <InlineTitle documentId={doc.id} title={doc.title} />
             </h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               <Badge className="bg-brand-50 text-brand-700">실시간 문서</Badge>
@@ -243,20 +241,22 @@ export default async function DocumentPage({
           </div>
           <ShareLinkButton documentId={doc.id} title={doc.title} className="shrink-0 self-start" />
         </div>
-        <LiveEditor
-          documentId={doc.id}
-          title={doc.title}
-          focusAt={focusAt}
-          roomId={docRoomId(doc.id)}
-          initialHtml={doc.content ? null : doc.initialHtml}
-          lastSavedAt={doc.lastEditedAt?.toISOString() ?? null}
-          snapshots={snapshots.map((s) => ({ id: s.id, label: s.label, createdAt: s.createdAt.toISOString(), createdByName: s.createdByName }))}
-          storage={storage}
-        />
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_340px]">
-          {commentsCard}
-          {infoCard}
+        <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start xl:gap-5">
+          <LiveEditor
+            documentId={doc.id}
+            title={doc.title}
+            focusAt={focusAt}
+            roomId={docRoomId(doc.id)}
+            initialHtml={doc.content ? null : doc.initialHtml}
+            lastSavedAt={doc.lastEditedAt?.toISOString() ?? null}
+            snapshots={snapshots.map((s) => ({ id: s.id, label: s.label, createdAt: s.createdAt.toISOString(), createdByName: s.createdByName }))}
+            storage={storage}
+            commentAnchors={threads.filter((t) => t.anchor && !t.resolved).map((t) => ({ id: t.id, anchor: t.anchor! }))}
+          />
+          {/* 넓은 화면: 편집기 옆에 코멘트 고정 / 좁은 화면: 편집기 아래 */}
+          <aside className="mt-6 xl:sticky xl:top-4 xl:mt-0 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">{commentsCard}</aside>
         </div>
+        <div className="mt-6 max-w-2xl">{infoCard}</div>
       </div>
     );
   }
@@ -269,7 +269,7 @@ export default async function DocumentPage({
         <div className="min-w-0">
           <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 sm:text-2xl">
             <DocIcon kind={doc.kind} fileName={latest?.fileName} />
-            <span className="truncate">{doc.title}</span>
+            <InlineTitle documentId={doc.id} title={doc.title} />
           </h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-gray-500">
             <Badge className="bg-gray-100 text-gray-700">{optionLabel(DOC_CATEGORIES, doc.category)}</Badge>

@@ -1,8 +1,10 @@
+import { isPositionCode } from "./links";
+
 /** 팀원 실시간 활동(Liveblocks presence) 정의와 문장 만들기 */
 
 export type TeamPresence = Liveblocks["Presence"];
 
-export const EMPTY_PRESENCE: TeamPresence = { page: null, title: null, doing: null, typing: false, away: false, since: 0 };
+export const EMPTY_PRESENCE: TeamPresence = { page: null, title: null, doing: null, typing: false, away: false, since: 0, at: null, section: null };
 
 /** 5분 동안 조작이 없으면 자리 비움 */
 export const IDLE_MS = 5 * 60 * 1000;
@@ -42,6 +44,12 @@ export function isAppPath(path: string | null): path is string {
   return !!path && /^\/(?![/\\])/.test(path) && path.length < 500;
 }
 
+/** 팀원이 있는 곳으로 가는 주소 (실시간 문서면 커서 위치까지) */
+export function presenceHref(p: TeamPresence): string | null {
+  if (!isAppPath(p.page)) return null;
+  return pageSection(p.page) === "document" && isPositionCode(p.at) ? `${p.page}?at=${p.at}` : p.page;
+}
+
 /** 브라우저 탭 제목에서 앱 이름을 뗀 화면 제목 */
 export function screenTitle(documentTitle: string): string | null {
   const t = documentTitle.replace(/\s*·\s*BX Hub$/, "").trim();
@@ -71,7 +79,7 @@ export function describeActivity(p: TeamPresence): string {
     case "documents":
       return "문서 목록 보는 중";
     case "document":
-      return `${named("문서")} ${p.typing ? "편집 중" : "보는 중"}`;
+      return `${named("문서")}${p.section ? ` › ${p.section}` : ""} ${p.typing ? "편집 중" : "보는 중"}`;
     case "document-new":
       return p.typing ? "새 문서 작성 중" : "새 문서 만드는 중";
     case "schedule":

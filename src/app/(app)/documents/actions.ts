@@ -1,18 +1,20 @@
 "use server";
 
-import { and, eq, max } from "drizzle-orm";
+import { and, eq, gte, isNull, max } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { refreshFigmaDocs } from "@/lib/figma";
 import { db } from "@/db";
-import { comments, documents, documentVersions } from "@/db/schema";
+import { activities, comments, documents, documentVersions } from "@/db/schema";
 import { logActivity } from "@/lib/activity";
 import { requireUser } from "@/lib/auth";
 import { ALLOWED_UPLOAD_EXTENSIONS, DOC_CATEGORIES } from "@/lib/constants";
 import { convertFileDocument } from "@/lib/convert";
+import { formatTime } from "@/lib/dates";
 import { isEditableFile, mimeFromName } from "@/lib/mime";
 import { deleteFile, isValidStorageKey } from "@/lib/storage";
+import { clip, isPositionCode } from "@/lib/links";
 import { fileExtension, isFigmaUrl, isHttpUrl, isUuid, str, type ActionState } from "@/lib/utils";
 
 type UploadedFileInput = { fileName: string; size: number; storage: string; key: string };
@@ -158,7 +160,8 @@ export async function updateDocument(id: string, _prev: ActionState, form: FormD
   if (!isUuid(id)) return { error: "잘못된 요청입니다." };
   const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
   if (!doc) return { error: "문서를 찾을 수 없습니다." };
-  const title = str(form, "title");
+  // 제목은 문서 위쪽에서 바로 고치므로 이 폼에 없으면 그대로 둠
+  const title = form.has("title") ? str(form, "title") : doc.title;
   if (!title) return { error: "제목을 입력하세요." };
   const url = str(form, "url");
   if (doc.kind === "figma" && !isFigmaUrl(url)) return { error: "Figma 공유 링크를 입력하세요." };
@@ -176,9 +179,32 @@ export async function updateDocument(id: string, _prev: ActionState, form: FormD
       updatedAt: new Date(),
     })
     .where(eq(documents.id, id));
-  await logActivity({ actorId: user.id, verb: "문서 정보를 수정했습니다", targetType: "document", targetId: id, targetTitle: title, projectId: isUuid(projectId) ? projectId : null });
+  await logEditOnce(user.id, id, "문서 정보를 수정했습니다", title, isUuid(projectId) ? projectId : null);
   revalidatePath("/", "layout");
-  return { ok: true, message: "저장했습니다." };
+  return { ok: true, message: `자동 저장됨 · ${formatTime(new Date())}` };
+}
+
+/** 같은 팀원이 같은 문서를 연달아 고칠 때 활동은 10분에 한 번만 기록 (자동 저장으로 기록이 넘치지 않도록) */
+async function logEditOnce(actorId: string, documentId: string, verb: string, title: string, projectId: string | null) {
+  const [recent] = await db
+    .select({ id: activities.id })
+    .from(activities)
+    .where(and(eq(activities.targetId, documentId), eq(activities.actorId, actorId), eq(activities.verb, verb), gte(activities.createdAt, new Date(Date.now() - 10 * 60 * 1000))))
+    .limit(1);
+  if (!recent) await logActivity({ actorId, verb, targetType: "document", targetId: documentId, targetTitle: title, projectId });
+}
+
+/** 문서 제목 바로 고치기 (입력하면 자동 저장) */
+export async function renameDocument(id: string, rawTitle: string): Promise<{ error?: string; title?: string }> {
+  const user = await requireUser();
+  if (!isUuid(id)) return { error: "잘못된 요청입니다." };
+  const title = String(rawTitle ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!title) return { error: "제목을 입력하세요." };
+  const [doc] = await db.update(documents).set({ title, updatedAt: new Date() }).where(eq(documents.id, id)).returning({ projectId: documents.projectId });
+  if (!doc) return { error: "문서를 찾을 수 없습니다." };
+  await logEditOnce(user.id, id, "문서 제목을 바꿨습니다", title, doc.projectId);
+  revalidatePath("/", "layout");
+  return { title };
 }
 
 export async function deleteDocument(id: string) {
@@ -194,17 +220,75 @@ export async function deleteDocument(id: string) {
   redirect("/documents");
 }
 
-export async function addComment(documentId: string, _prev: ActionState, form: FormData): Promise<ActionState> {
+const MAX_COMMENT_LENGTH = 5000;
+
+/**
+ * 코멘트 등록 — 문서 전체 의견, 실시간 문서 안 위치 코멘트(anchor), 답글(parentId)
+ */
+export async function postComment(input: {
+  documentId: string;
+  body: string;
+  anchor?: string | null;
+  quote?: string | null;
+  parentId?: string | null;
+}): Promise<{ error?: string; id?: string }> {
   const user = await requireUser();
-  const body = str(form, "body");
+  const body = String(input.body ?? "").trim().slice(0, MAX_COMMENT_LENGTH);
   if (!body) return { error: "내용을 입력하세요." };
-  if (!isUuid(documentId)) return { error: "잘못된 요청입니다." };
-  const [doc] = await db.select({ title: documents.title, projectId: documents.projectId }).from(documents).where(eq(documents.id, documentId)).limit(1);
+  if (!isUuid(input.documentId)) return { error: "잘못된 요청입니다." };
+  const [doc] = await db
+    .select({ title: documents.title, projectId: documents.projectId, kind: documents.kind })
+    .from(documents)
+    .where(eq(documents.id, input.documentId))
+    .limit(1);
   if (!doc) return { error: "문서를 찾을 수 없습니다." };
-  await db.insert(comments).values({ documentId, authorId: user.id, body });
-  await logActivity({ actorId: user.id, verb: "문서에 의견을 남겼습니다", targetType: "comment", targetId: documentId, targetTitle: doc.title, projectId: doc.projectId });
-  revalidatePath(`/documents/${documentId}`);
-  return { ok: true };
+
+  let parentId: string | null = null;
+  if (input.parentId) {
+    if (!isUuid(input.parentId)) return { error: "잘못된 요청입니다." };
+    const [parent] = await db
+      .select({ id: comments.id, documentId: comments.documentId, parentId: comments.parentId })
+      .from(comments)
+      .where(eq(comments.id, input.parentId))
+      .limit(1);
+    if (!parent || parent.documentId !== input.documentId) return { error: "원 코멘트를 찾을 수 없습니다." };
+    parentId = parent.parentId ?? parent.id; // 답글에 단 답글도 같은 스레드로
+  }
+  const anchor = !parentId && doc.kind === "live" && isPositionCode(input.anchor) ? input.anchor : null;
+  const quote = anchor ? clip(String(input.quote ?? ""), 120) || null : null;
+
+  const [row] = await db
+    .insert(comments)
+    .values({ documentId: input.documentId, authorId: user.id, body, parentId, anchor, quote })
+    .returning({ id: comments.id });
+  await logActivity({
+    actorId: user.id,
+    verb: parentId ? "코멘트에 답글을 남겼습니다" : anchor ? "문서에 위치 코멘트를 남겼습니다" : "문서에 의견을 남겼습니다",
+    targetType: "comment",
+    targetId: input.documentId,
+    targetTitle: doc.title,
+    projectId: doc.projectId,
+  });
+  revalidatePath(`/documents/${input.documentId}`);
+  return { id: row.id };
+}
+
+/** 코멘트 해결 / 다시 열기 (원 코멘트만) */
+export async function setCommentResolved(commentId: string, resolved: boolean): Promise<{ error?: string }> {
+  const user = await requireUser();
+  if (!isUuid(commentId)) return { error: "잘못된 요청입니다." };
+  const [row] = await db
+    .update(comments)
+    .set(resolved ? { resolvedAt: new Date(), resolvedBy: user.id } : { resolvedAt: null, resolvedBy: null })
+    .where(and(eq(comments.id, commentId), isNull(comments.parentId)))
+    .returning({ documentId: comments.documentId });
+  if (!row) return { error: "코멘트를 찾을 수 없습니다." };
+  if (resolved) {
+    const [doc] = await db.select({ title: documents.title, projectId: documents.projectId }).from(documents).where(eq(documents.id, row.documentId)).limit(1);
+    if (doc) await logActivity({ actorId: user.id, verb: "코멘트를 해결했습니다", targetType: "comment", targetId: row.documentId, targetTitle: doc.title, projectId: doc.projectId });
+  }
+  revalidatePath(`/documents/${row.documentId}`);
+  return {};
 }
 
 export async function deleteComment(commentId: string) {
