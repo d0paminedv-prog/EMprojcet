@@ -9,6 +9,7 @@ import {
   describeActivity,
   EMPTY_PRESENCE,
   IDLE_MS,
+  liveTabs,
   pickPresence,
   presenceHref,
   PULSE_MS,
@@ -361,15 +362,15 @@ type OnlineMember = { id: string; name: string; color: string; presence: TeamPre
 function useOnlineMembers(selfId: string): OnlineMember[] {
   const tabs = usePulseMembers();
   return useMemo(() => {
-    const byId = new Map<string, { name: string; color: string; list: TeamPresence[] }>();
+    const byId = new Map<string, { name: string; color: string; list: PulseMember[] }>();
     for (const t of tabs) {
       if (t.id === selfId) continue;
       const entry = byId.get(t.id) ?? { name: t.name, color: t.color, list: [] };
-      entry.list.push(t.presence);
+      entry.list.push(t);
       byId.set(t.id, entry);
     }
     return [...byId.entries()]
-      .map(([id, e]) => ({ id, name: e.name, color: e.color, presence: pickPresence(e.list) }))
+      .map(([id, e]) => ({ id, name: e.name, color: e.color, presence: pickPresence(liveTabs(e.list).map((t) => t.presence)) }))
       .sort((a, b) => Number(a.presence.away) - Number(b.presence.away) || a.name.localeCompare(b.name, "ko"));
   }, [tabs, selfId]);
 }
@@ -377,7 +378,10 @@ function useOnlineMembers(selfId: string): OnlineMember[] {
 /** 팀원 한 명의 탭들 */
 function useMemberTabs(memberId: string): TeamPresence[] {
   const tabs = usePulseMembers();
-  return useMemo(() => tabs.filter((t) => t.id === memberId).map((t) => t.presence), [tabs, memberId]);
+  return useMemo(() => {
+    const mine = tabs.filter((t) => t.id === memberId);
+    return mine.length ? liveTabs(mine).map((t) => t.presence) : [];
+  }, [tabs, memberId]);
 }
 
 /** 「n분째」 표시를 위해 30초마다 다시 그림 */
@@ -539,7 +543,9 @@ export function HereNow() {
   const { selfId } = useRealtime();
   const tabs = usePulseMembers();
   const here = new Map<string, { name: string; color: string; typing: boolean }>();
-  for (const t of tabs) {
+  const byMember = new Map<string, PulseMember[]>();
+  for (const t of tabs) byMember.set(t.id, [...(byMember.get(t.id) ?? []), t]);
+  for (const t of [...byMember.values()].flatMap((list) => liveTabs(list))) {
     if (t.id === selfId || t.presence.page !== pathname || t.presence.away) continue;
     const prev = here.get(t.id);
     here.set(t.id, { name: t.name, color: t.color, typing: !!prev?.typing || t.presence.typing });

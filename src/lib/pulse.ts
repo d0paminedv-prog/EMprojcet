@@ -50,7 +50,7 @@ export async function pulse(memberId: string, tab: string, state: TeamPresence, 
 
   const [rows, [last]] = await Promise.all([
     db
-      .select({ tab: presence.tabId, id: presence.memberId, state: presence.state, name: members.name, color: members.color })
+      .select({ tab: presence.tabId, id: presence.memberId, state: presence.state, seen: presence.updatedAt, name: members.name, color: members.color })
       .from(presence)
       .innerJoin(members, eq(members.id, presence.memberId))
       .where(
@@ -66,7 +66,7 @@ export async function pulse(memberId: string, tab: string, state: TeamPresence, 
   if (Math.random() < 0.02) await db.delete(presence).where(lt(presence.updatedAt, sql`now() - interval '1 day'`));
 
   return {
-    members: rows.map((r) => ({ id: r.id, name: r.name, color: r.color, tab: r.tab, presence: cleanPresence(r.state) })),
+    members: rows.map((r) => ({ id: r.id, name: r.name, color: r.color, tab: r.tab, seen: new Date(r.seen).getTime(), presence: cleanPresence(r.state) })),
     changedAt: last?.at ? new Date(last.at).getTime() : null,
   };
 }
