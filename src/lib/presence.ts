@@ -1,6 +1,6 @@
 import { isPositionCode } from "./links";
 
-/** 팀원 실시간 활동(Liveblocks presence) 정의와 문장 만들기 */
+/** 팀원 실시간 활동 정의와 문장 만들기 (앱 서버 신호 + 실시간 문서 방 presence 공용) */
 
 export type TeamPresence = Liveblocks["Presence"];
 
@@ -8,6 +8,13 @@ export const EMPTY_PRESENCE: TeamPresence = { page: null, title: null, doing: nu
 
 /** 5분 동안 조작이 없으면 자리 비움 */
 export const IDLE_MS = 5 * 60 * 1000;
+
+/** 팀원 활동 신호 간격 (앱 서버 /api/pulse) */
+export const PULSE_MS = 20_000;
+
+/** 접속 중인 팀원 탭 하나 (seen: 마지막 신호 시각, 서버 시계 ms) */
+export type PulseMember = { id: string; name: string; color: string; tab: string; seen: number; presence: TeamPresence };
+export type PulseResult = { members: PulseMember[]; changedAt: number | null };
 
 type SectionKind =
   | "dashboard"
@@ -89,6 +96,15 @@ export function describeActivity(p: TeamPresence): string {
     default:
       return "접속 중";
   }
+}
+
+/**
+ * 한 팀원의 탭들 중 지금 쓰는 것만: 가장 최근 신호보다 30초 넘게 뒤처진 탭은 닫혔거나(강제 종료·절전)
+ * 다른 기기로 옮겨 간 것이라 뺌 — 보고 있는 탭은 20초마다 신호를 보냄
+ */
+export function liveTabs<T extends { seen: number }>(tabs: T[]): T[] {
+  const latest = Math.max(...tabs.map((t) => t.seen));
+  return tabs.filter((t) => latest - t.seen <= PULSE_MS + 10_000);
 }
 
 /** 같은 팀원이 여러 탭으로 접속한 경우 가장 의미 있는 활동 하나를 고름 */

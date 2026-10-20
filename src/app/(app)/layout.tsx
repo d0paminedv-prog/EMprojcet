@@ -15,7 +15,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
 
   return (
-    <TeamRealtimeProvider enabled={liveblocksConfigured()} baseUrl={liveblocksBaseUrl()}>
+    <TeamRealtimeProvider enabled={liveblocksConfigured()} baseUrl={liveblocksBaseUrl()} selfId={user.id}>
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-60 shrink-0 border-r border-gray-200 bg-white lg:flex lg:flex-col">
         <div className="sticky top-0 flex h-screen flex-col p-4">

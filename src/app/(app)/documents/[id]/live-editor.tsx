@@ -830,8 +830,8 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
     emit<NewCommentDetail>(NEW_COMMENT_EVENT, { anchor, quote });
   }, []);
 
-  // 내 커서 위치를 함께 편집하는 팀원(문서 방)과 사이드바 활동에 공유.
-  // Liveblocks 협업 분 절약: 커서만 움직일 때는 있는 제목이 바뀔 때만, 입력 중에는 최대 5초에 한 번 보냄
+  // 내 커서 위치를 함께 편집하는 팀원(문서 방)과 사이드바 활동(앱 서버 신호)에 공유.
+  // 협업 분 절약: 커서만 움직일 때는 있는 제목이 바뀔 때만, 입력 중에는 최대 5초에 한 번 보냄
   // (입력 자체가 이미 방의 활동이라 입력 중 전송은 사용량을 늘리지 않음)
   const updateMyPresence = useUpdateMyPresence();
   useEffect(() => {
@@ -1110,7 +1110,7 @@ function EditorLoading() {
 }
 
 export function LiveEditor(props: Props) {
-  const { enabled, teamPresence } = useRealtime();
+  const { enabled } = useRealtime();
   if (!enabled) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -1121,8 +1121,8 @@ export function LiveEditor(props: Props) {
   const { roomId, ...rest } = props;
   return (
     <RoomProvider id={roomId} initialPresence={EMPTY_PRESENCE}>
-      {/* 팀 방을 쓰지 않을 때: 코멘트·제목 등 변경은 이 문서를 보는 팀원에게만 즉시 알림 */}
-      {!teamPresence && <RoomChangeBridge />}
+      {/* 코멘트·제목 등 변경을 이 문서를 보는 팀원에게 즉시 알림 */}
+      <RoomChangeBridge />
       <ClientSideSuspense fallback={<EditorLoading />}>
         <CollaborativeEditor {...rest} />
       </ClientSideSuspense>

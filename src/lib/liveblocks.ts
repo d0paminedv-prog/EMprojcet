@@ -21,7 +21,6 @@ export function liveblocks(): Liveblocks {
   return globalForLb.__bxLiveblocks;
 }
 
-/** 방 이름 규칙: 팀 전체 방(접속자·변경 알림) + 문서별 방 */
+/** 방 이름 규칙: 문서별 방 (팀원 활동·변경 알림은 앱 서버 /api/pulse 로 — 협업 분 절약) */
 export const ROOM_PREFIX = "bx:";
-export const TEAM_ROOM = "bx:team";
 export const docRoomId = (documentId: string) => `bx:doc:${documentId}`;
