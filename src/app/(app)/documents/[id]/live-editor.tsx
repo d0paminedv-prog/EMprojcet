@@ -53,7 +53,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { Avatar } from "@/components/ui";
-import { announceLocation, notifyChange, useRealtime } from "@/components/realtime";
+import { announceLocation, notifyChange, RoomChangeBridge, useRealtime } from "@/components/realtime";
 import { absoluteUrl, shareOrCopy, Toast } from "@/components/share-link";
 import { clip, documentPath, parseAppLink } from "@/lib/links";
 import { EMPTY_PRESENCE } from "@/lib/presence";
@@ -830,29 +830,48 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
     emit<NewCommentDetail>(NEW_COMMENT_EVENT, { anchor, quote });
   }, []);
 
-  // 내 커서 위치를 함께 편집하는 팀원(문서 방)과 사이드바 활동(팀 방)에 공유
+  // 내 커서 위치를 함께 편집하는 팀원(문서 방)과 사이드바 활동에 공유.
+  // Liveblocks 협업 분 절약: 커서만 움직일 때는 있는 제목이 바뀔 때만, 입력 중에는 최대 5초에 한 번 보냄
+  // (입력 자체가 이미 방의 활동이라 입력 중 전송은 사용량을 늘리지 않음)
   const updateMyPresence = useUpdateMyPresence();
   useEffect(() => {
     if (!editor) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let selectionTimer: ReturnType<typeof setTimeout> | undefined;
+    let editTimer: ReturnType<typeof setTimeout> | undefined;
     let interacted = false;
-    const publish = () => {
+    let lastSection: string | null | undefined;
+    let lastSentAt = 0;
+    const send = () => {
+      editTimer = undefined;
+      const { from } = editor.state.selection;
+      const location = { at: encodePosition(editor.state, from), section: sectionTitleAt(editor.state.doc, from) };
+      lastSection = location.section;
+      lastSentAt = Date.now();
+      updateMyPresence(location);
+      announceLocation(location);
+    };
+    const onSelection = () => {
       if (!interacted && !editor.isFocused) return;
       interacted = true;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const { from } = editor.state.selection;
-        const location = { at: encodePosition(editor.state, from), section: sectionTitleAt(editor.state.doc, from) };
-        updateMyPresence(location);
-        announceLocation(location);
+      clearTimeout(selectionTimer);
+      selectionTimer = setTimeout(() => {
+        if (sectionTitleAt(editor.state.doc, editor.state.selection.from) !== lastSection) send();
       }, 300);
     };
-    editor.on("selectionUpdate", publish);
-    editor.on("focus", publish);
+    const onEdit = ({ transaction }: { transaction: { getMeta: (key: string) => unknown } }) => {
+      if (isRemoteChange(transaction) || editTimer) return;
+      interacted = true;
+      editTimer = setTimeout(send, Math.max(300, 5000 - (Date.now() - lastSentAt)));
+    };
+    editor.on("selectionUpdate", onSelection);
+    editor.on("focus", onSelection);
+    editor.on("update", onEdit);
     return () => {
-      clearTimeout(timer);
-      editor.off("selectionUpdate", publish);
-      editor.off("focus", publish);
+      clearTimeout(selectionTimer);
+      clearTimeout(editTimer);
+      editor.off("selectionUpdate", onSelection);
+      editor.off("focus", onSelection);
+      editor.off("update", onEdit);
     };
   }, [editor, updateMyPresence]);
 
@@ -1091,7 +1110,7 @@ function EditorLoading() {
 }
 
 export function LiveEditor(props: Props) {
-  const { enabled } = useRealtime();
+  const { enabled, teamPresence } = useRealtime();
   if (!enabled) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -1102,6 +1121,8 @@ export function LiveEditor(props: Props) {
   const { roomId, ...rest } = props;
   return (
     <RoomProvider id={roomId} initialPresence={EMPTY_PRESENCE}>
+      {/* 팀 방을 쓰지 않을 때: 코멘트·제목 등 변경은 이 문서를 보는 팀원에게만 즉시 알림 */}
+      {!teamPresence && <RoomChangeBridge />}
       <ClientSideSuspense fallback={<EditorLoading />}>
         <CollaborativeEditor {...rest} />
       </ClientSideSuspense>

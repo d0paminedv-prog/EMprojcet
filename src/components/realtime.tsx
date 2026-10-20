@@ -9,7 +9,7 @@ import { describeActivity, EMPTY_PRESENCE, IDLE_MS, pickPresence, presenceHref, 
 import { cn } from "@/lib/utils";
 import { Avatar } from "./ui";
 
-const RealtimeContext = createContext<{ enabled: boolean; baseUrl?: string }>({ enabled: false });
+const RealtimeContext = createContext<{ enabled: boolean; baseUrl?: string; teamPresence: boolean }>({ enabled: false, teamPresence: false });
 
 export function useRealtime() {
   return useContext(RealtimeContext);
@@ -47,6 +47,30 @@ function BroadcastBridge() {
     return () => window.removeEventListener(CHANGE_EVENT, handler);
   }, [broadcast]);
   return null;
+}
+
+/** 문서 방 안에서 변경 알림을 즉시 받고 있는 화면 수 — 이때는 주기 갱신이 필요 없음 */
+let liveBridges = 0;
+
+const POLL_MS = 30000;
+
+/**
+ * 지금 들어가 있는 방(문서 방)으로 변경 알림을 주고받아 같은 문서를 보는 팀원 화면을 즉시 새로고침.
+ * 코멘트·제목처럼 가끔 생기는 이벤트라 협업 분을 거의 쓰지 않음
+ */
+export function RoomChangeBridge() {
+  useEffect(() => {
+    liveBridges++;
+    return () => {
+      liveBridges--;
+    };
+  }, []);
+  return (
+    <>
+      <BroadcastBridge />
+      <RefreshOnChange />
+    </>
+  );
 }
 
 /** 다른 팀원이 데이터를 바꿨다는 신호를 받으면 현재 화면을 새로고침 */
@@ -140,30 +164,67 @@ function PresenceTracker() {
   return null;
 }
 
-/** Liveblocks 미설정 시: 30초마다 화면 갱신 */
+/**
+ * 30초마다 화면 갱신 — 다른 팀원이 바꾼 내용 반영.
+ * 보고 있는 탭에서만, 5분 넘게 조작이 없으면 멈춤(서버·DB 절약), 돌아오면 바로 한 번 갱신
+ */
 function PollingRefresh() {
   const router = useRouter();
   useEffect(() => {
+    let lastInput = Date.now();
+    let lastRefresh = Date.now();
+    const refresh = () => {
+      lastRefresh = Date.now();
+      router.refresh();
+    };
+    const due = () => document.visibilityState === "visible" && liveBridges === 0 && Date.now() - lastRefresh >= POLL_MS - 1000;
+    const touch = () => {
+      const wasIdle = Date.now() - lastInput > IDLE_MS;
+      lastInput = Date.now();
+      if (wasIdle && due()) refresh();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      lastInput = Date.now();
+      if (due()) refresh();
+    };
     const id = setInterval(() => {
-      if (document.visibilityState === "visible") router.refresh();
-    }, 30000);
-    return () => clearInterval(id);
+      if (due() && Date.now() - lastInput <= IDLE_MS) refresh();
+    }, POLL_MS);
+    const events = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+    events.forEach((name) => window.addEventListener(name, touch, { passive: true }));
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      events.forEach((name) => window.removeEventListener(name, touch));
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [router]);
   return null;
 }
 
 export const TEAM_ROOM = "bx:team";
 
+/** 다른 탭을 보고 있는 동안 이만큼 지나면 문서 방 연결을 끊음 (돌아오면 자동 재연결) — 협업 분 절약 */
+const BACKGROUND_DISCONNECT_MS = 2 * 60 * 1000;
+
 export function TeamRealtimeProvider({
   enabled,
   baseUrl,
+  teamPresence = false,
   children,
 }: {
   enabled: boolean;
   baseUrl?: string;
+  /**
+   * 팀 전체 방(bx:team)으로 접속·활동을 실시간 공유할지.
+   * 모든 화면이 항상 접속해 Liveblocks 무료 협업 분(월 3,000분)을 빠르게 써서 꺼 둠.
+   * 꺼져 있으면 문서 방(실시간 편집)만 Liveblocks 를 쓰고, 다른 화면은 30초마다 갱신
+   */
+  teamPresence?: boolean;
   children: React.ReactNode;
 }) {
-  const value = useMemo(() => ({ enabled, baseUrl }), [enabled, baseUrl]);
+  const value = useMemo(() => ({ enabled, baseUrl, teamPresence: enabled && teamPresence }), [enabled, baseUrl, teamPresence]);
   if (!enabled) {
     return (
       <RealtimeContext.Provider value={value}>
@@ -175,13 +236,26 @@ export function TeamRealtimeProvider({
   return (
     <RealtimeContext.Provider value={value}>
       {/* preventUnsavedChanges: 아직 서버에 반영되지 않은 편집이 있으면 창을 닫기 전에 경고 */}
-      <LiveblocksProvider authEndpoint="/api/liveblocks-auth" baseUrl={baseUrl} throttle={80} preventUnsavedChanges>
-        <RoomProvider id={TEAM_ROOM} initialPresence={EMPTY_PRESENCE}>
-          <RefreshOnChange />
-          <BroadcastBridge />
-          <PresenceTracker />
-          {children}
-        </RoomProvider>
+      <LiveblocksProvider
+        authEndpoint="/api/liveblocks-auth"
+        baseUrl={baseUrl}
+        throttle={80}
+        preventUnsavedChanges
+        backgroundKeepAliveTimeout={BACKGROUND_DISCONNECT_MS}
+      >
+        {value.teamPresence ? (
+          <RoomProvider id={TEAM_ROOM} initialPresence={EMPTY_PRESENCE}>
+            <RefreshOnChange />
+            <BroadcastBridge />
+            <PresenceTracker />
+            {children}
+          </RoomProvider>
+        ) : (
+          <>
+            <PollingRefresh />
+            {children}
+          </>
+        )}
       </LiveblocksProvider>
     </RealtimeContext.Provider>
   );
@@ -323,8 +397,8 @@ function OnlineList({ selfId, compact }: { selfId: string; compact?: boolean }) 
 
 /** 사이드바/헤더의 접속자 + 실시간 활동 */
 export function OnlineMembers({ selfId, compact }: { selfId: string; compact?: boolean }) {
-  const { enabled } = useRealtime();
-  if (!enabled) return null;
+  const { teamPresence } = useRealtime();
+  if (!teamPresence) return null;
   return <OnlineList selfId={selfId} compact={compact} />;
 }
 
@@ -344,8 +418,8 @@ function OnlineDotInner({ memberId }: { memberId: string }) {
 
 /** 팀원 아바타 옆 접속 표시 점 (초록: 접속 중, 노랑: 자리 비움) */
 export function OnlineDot({ memberId }: { memberId: string }) {
-  const { enabled } = useRealtime();
-  if (!enabled) return null;
+  const { teamPresence } = useRealtime();
+  if (!teamPresence) return null;
   return <OnlineDotInner memberId={memberId} />;
 }
 
@@ -362,8 +436,8 @@ function MemberActivityInner({ memberId, isMe }: { memberId: string; isMe?: bool
 
 /** 팀원 한 명의 지금 활동 한 줄 (대시보드·팀 화면) */
 export function MemberActivity({ memberId, isMe, className }: { memberId: string; isMe?: boolean; className?: string }) {
-  const { enabled } = useRealtime();
-  if (!enabled) return null;
+  const { teamPresence } = useRealtime();
+  if (!teamPresence) return null;
   return (
     <span className={cn("block min-w-0 text-xs", className)} data-testid="member-activity">
       <MemberActivityInner memberId={memberId} isMe={isMe} />
@@ -397,7 +471,7 @@ function HereNowInner() {
 
 /** 지금 같은 화면을 보고 있는 팀원 */
 export function HereNow() {
-  const { enabled } = useRealtime();
-  if (!enabled) return null;
+  const { teamPresence } = useRealtime();
+  if (!teamPresence) return null;
   return <HereNowInner />;
 }
