@@ -32,9 +32,9 @@ const MAX_IMAGE_WIDTH = 600;
 /** A4 본문 너비 (twip = 1/20pt, 1px ≈ 15twip) */
 const CONTENT_WIDTH_TWIPS = 11906 - 1100 * 2;
 
-/** 셀 배경색 (색 채우기 > 머리글 기본 회색). Word 는 # 없는 대문자 16진수 */
-function cellFill(cell: PMNode, header: boolean): string | null {
-  const color = normalizeColor(cell.attrs?.backgroundColor) ?? (header ? "#f3f4f6" : null);
+/** 셀 배경색 — 「셀 색 채우기」로 지정한 칸만 (기본은 투명). Word 는 # 없는 대문자 16진수 */
+function cellFill(cell: PMNode): string | null {
+  const color = normalizeColor(cell.attrs?.backgroundColor);
   return color ? color.slice(1).toUpperCase() : null;
 }
 
@@ -194,7 +194,7 @@ class Converter {
             children: children.length ? children : [new Paragraph("")],
             columnSpan: Number(cell.attrs?.colspan ?? 1) || 1,
             rowSpan: Number(cell.attrs?.rowspan ?? 1) || 1,
-            shading: cellFill(cell, header) ? { type: ShadingType.CLEAR, color: "auto", fill: cellFill(cell, header)! } : undefined,
+            shading: cellFill(cell) ? { type: ShadingType.CLEAR, color: "auto", fill: cellFill(cell)! } : undefined,
             margins: { top: 60, bottom: 60, left: 100, right: 100 },
             borders: { top: BORDER, bottom: BORDER, left: BORDER, right: BORDER },
           }),
