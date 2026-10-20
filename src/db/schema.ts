@@ -211,6 +211,28 @@ export const activities = pgTable(
   (t) => [index("activities_created_idx").on(t.createdAt)],
 );
 
+/**
+ * 팀원 실시간 활동 — 열린 탭마다 한 줄. 탭이 20초마다 보내는 신호로 갱신(앱 서버, Liveblocks 미사용).
+ * 접속 표시용이라 하루 지난 줄은 지움
+ */
+export const presence = pgTable(
+  "presence",
+  {
+    tabId: text("tab_id").primaryKey(),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    /** 화면·제목·하는 일·입력 중·자리 비움·문서 안 위치 (TeamPresence) */
+    state: jsonb("state").$type<Record<string, unknown>>().notNull(),
+    updatedAt: updatedAt(),
+    /** 이 탭에서 데이터를 마지막으로 바꾼 시각 — 다른 탭은 이보다 오래된 화면이면 새로고침 */
+    changedAt: timestamp("changed_at", { withTimezone: true }),
+    /** 탭을 닫음 */
+    goneAt: timestamp("gone_at", { withTimezone: true }),
+  },
+  (t) => [index("presence_updated_idx").on(t.updatedAt)],
+);
+
 /** 입장 코드 연속 실패 제한 (IP 기준) */
 export const entryAttempts = pgTable("entry_attempts", {
   key: text("key").primaryKey(),

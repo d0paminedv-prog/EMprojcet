@@ -1,6 +1,6 @@
 import { isPositionCode } from "./links";
 
-/** 팀원 실시간 활동(Liveblocks presence) 정의와 문장 만들기 */
+/** 팀원 실시간 활동 정의와 문장 만들기 (앱 서버 신호 + 실시간 문서 방 presence 공용) */
 
 export type TeamPresence = Liveblocks["Presence"];
 
@@ -8,6 +8,13 @@ export const EMPTY_PRESENCE: TeamPresence = { page: null, title: null, doing: nu
 
 /** 5분 동안 조작이 없으면 자리 비움 */
 export const IDLE_MS = 5 * 60 * 1000;
+
+/** 팀원 활동 신호 간격 (앱 서버 /api/pulse) */
+export const PULSE_MS = 20_000;
+
+/** 접속 중인 팀원 탭 하나 */
+export type PulseMember = { id: string; name: string; color: string; tab: string; presence: TeamPresence };
+export type PulseResult = { members: PulseMember[]; changedAt: number | null };
 
 type SectionKind =
   | "dashboard"
