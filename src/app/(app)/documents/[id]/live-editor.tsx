@@ -5,7 +5,7 @@ import "@liveblocks/react-tiptap/styles.css";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { ClientSideSuspense, RoomProvider } from "@liveblocks/react";
+import { ClientSideSuspense, RoomProvider, useErrorListener, useStatus as useRoomStatus } from "@liveblocks/react";
 import { useOthers, useStatus, useUpdateMyPresence } from "@liveblocks/react/suspense";
 import { useLiveblocksExtension } from "@liveblocks/react-tiptap";
 import { findParentNode } from "@tiptap/core";
@@ -57,11 +57,13 @@ import { announceLocation, notifyChange, RoomChangeBridge, useRealtime } from "@
 import { absoluteUrl, shareOrCopy, Toast } from "@/components/share-link";
 import { clip, documentPath, parseAppLink } from "@/lib/links";
 import { EMPTY_PRESENCE } from "@/lib/presence";
+import type { SoloLock } from "@/lib/solo";
 import { uploadFile, type StorageClientConfig } from "@/lib/upload-client";
 import { CELL_COLORS } from "@/lib/colors";
 import { MAX_UPLOAD_BYTES } from "@/lib/constants";
 import { cn, formatBytes } from "@/lib/utils";
 import { createAsset, createSnapshot, getSnapshotContent, saveLiveContent } from "../live-actions";
+import { claimSoloEdits, fetchSoloState } from "./solo-client";
 import { emit, FOCUS_ANCHOR_EVENT, NEW_COMMENT_EVENT, type FocusAnchorDetail, type NewCommentDetail } from "./comment-events";
 import { CommentMarks, setCommentAnchors, type CommentAnchor } from "./comment-marks";
 import { IMAGE_FILES_EVENT, ImagePasteDrop, type ImageFilesDetail } from "./editor-images";
@@ -78,9 +80,17 @@ import {
   showTarget,
 } from "./doc-position";
 
-type Snapshot = { id: string; label: string; createdAt: string; createdByName: string | null };
+export type Snapshot = { id: string; label: string; createdAt: string; createdByName: string | null };
 
-type Props = {
+/** 단독 편집 모드 상태 (실시간 연결이 안 되는 팀원이 한 명씩 편집) */
+export type SoloInfo = {
+  /** 지금 단독 편집 중인 팀원 */
+  lock: SoloLock;
+  /** 단독 편집한 내용이 아직 실시간 문서에 반영되지 않음 */
+  pending: boolean;
+};
+
+export type DocEditorProps = {
   documentId: string;
   title: string;
   /** 공유받은 위치 링크의 위치 코드 (?at=) */
@@ -92,10 +102,16 @@ type Props = {
   storage: StorageClientConfig;
   /** 본문에 표시할 열린 위치 코멘트 */
   commentAnchors: CommentAnchor[];
+  solo: SoloInfo;
+};
+
+type Props = DocEditorProps & {
+  /** 실시간 연결이 안 됨 → 단독 편집 모드로 (carry: 연결이 끊긴 동안 내가 쓴 내용) */
+  onUnavailable: (carry: Record<string, unknown> | null) => void;
 };
 
 /** 입력을 멈추고 이만큼 지나면 검색·내보내기용 사본을 서버에 저장 (본문 자체는 Liveblocks 에 즉시 저장) */
-const SAVE_DELAY = 800;
+export const SAVE_DELAY = 800;
 
 type LiveblocksStorage = {
   doc: { getMap: (name: string) => { get: (key: string) => unknown; set: (key: string, value: unknown) => void } };
@@ -108,13 +124,37 @@ function isRemoteChange(transaction: { getMeta: (key: string) => unknown }): boo
 }
 
 /** 편집기 JSON → 일반 객체 (ProseMirror 속성 객체는 프로토타입이 없어 서버 액션 전송 시 누락되므로 복제) */
-function plainJson(editor: Editor): Record<string, unknown> {
+export function plainJson(editor: Editor): Record<string, unknown> {
   return JSON.parse(JSON.stringify(editor.getJSON())) as Record<string, unknown>;
 }
 
-function formatClock(iso: string | null): string {
+export function formatClock(iso: string | null): string {
   if (!iso) return "";
   return new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", hour: "numeric", minute: "2-digit", second: "2-digit" }).format(new Date(iso));
+}
+
+/**
+ * 실시간·단독 편집 공용 편집 기능.
+ * live: 실시간 공동 편집(Yjs) — 실행 취소는 Liveblocks 가 맡고, 위치 링크·위치 코멘트는 Yjs 위치를 써서 실시간에서만
+ */
+export function editorExtensions({ live }: { live: boolean }) {
+  return [
+    StarterKit.configure(live ? { undoRedo: false, link: { openOnClick: false, autolink: true } } : { link: { openOnClick: false, autolink: true } }),
+    // 열 경계를 끌어 너비 조절 (너비는 표 안에 저장되어 팀원에게 실시간 반영)
+    TableKit.configure({ table: { resizable: true, cellMinWidth: 48 }, tableCell: false, tableHeader: false }),
+    // 셀 색 채우기(배경색) 속성을 더한 표 칸
+    ColoredTableCell,
+    ColoredTableHeader,
+    Image,
+    Highlight,
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    Placeholder.configure({ placeholder: live ? "여기에 내용을 입력하세요. 팀원이 같은 문서를 열면 함께 편집됩니다." : "여기에 내용을 입력하세요." }),
+    ...(live ? [PositionLinks] : []),
+    ImagePasteDrop,
+    ...(live ? [CommentMarks] : []),
+  ];
 }
 
 // ---------------- 툴바 ----------------
@@ -175,11 +215,11 @@ function Sep() {
 const PALETTE_WIDTH = 240;
 
 // 화면 위에 붙어 있는 앱 머리글(모바일 상단 메뉴) 높이 — 편집 도구 막대를 그 바로 아래에 고정
-function appHeaderHeight(): number {
+export function appHeaderHeight(): number {
   const header = document.querySelector<HTMLElement>("[data-app-header]");
   return header && getComputedStyle(header).display !== "none" ? Math.round(header.getBoundingClientRect().height) : 0;
 }
-function subscribeAppHeader(onChange: () => void) {
+export function subscribeAppHeader(onChange: () => void) {
   const header = document.querySelector<HTMLElement>("[data-app-header]");
   const observer = header ? new ResizeObserver(onChange) : null;
   if (header) observer?.observe(header);
@@ -295,7 +335,7 @@ function CellColorPicker({ editor, current }: { editor: Editor; current: string 
   );
 }
 
-function Toolbar({
+export function Toolbar({
   editor,
   onImage,
   onCopyPositionLink,
@@ -451,8 +491,8 @@ function Toolbar({
 
 // 말풍선 설정은 고정 값으로 — 렌더마다 새로 만들면 BubbleMenu 가 매번 편집기 트랜잭션을 보내
 // 방금 클릭한 커서 위치를 이전 위치로 덮어씁니다.
-const showLinkMenu = ({ editor, view }: { editor: Editor; view: Editor["view"] }) => view.hasFocus() && editor.isActive("link");
-const LINK_MENU_OPTIONS = { strategy: "fixed", placement: "bottom-start", offset: 6, flip: true, shift: { padding: 8 } } as const;
+export const showLinkMenu = ({ editor, view }: { editor: Editor; view: Editor["view"] }) => view.hasFocus() && editor.isActive("link");
+export const LINK_MENU_OPTIONS = { strategy: "fixed", placement: "bottom-start", offset: 6, flip: true, shift: { padding: 8 } } as const;
 
 const showSelectionMenu = ({ editor, view, state }: { editor: Editor; view: Editor["view"]; state: Editor["state"] }) =>
   view.hasFocus() && state.selection instanceof TextSelection && !state.selection.empty && !editor.isActive("link");
@@ -476,7 +516,7 @@ function SelectionMenu({ onComment, onCopyLink }: { onComment: () => void; onCop
 }
 
 /** 커서가 링크 안에 있을 때 뜨는 말풍선: 열기 / 수정 / 해제 */
-function LinkMenu({ editor, onOpen }: { editor: Editor; onOpen: (href: string) => void }) {
+export function LinkMenu({ editor, onOpen }: { editor: Editor; onOpen: (href: string) => void }) {
   const href = useEditorState({ editor, selector: ({ editor: e }) => (e.isActive("link") ? String(e.getAttributes("link").href ?? "") : "") });
   if (!href) return null;
   const app = typeof window !== "undefined" ? parseAppLink(new URL(href, window.location.origin).href, window.location.origin) : null;
@@ -645,8 +685,24 @@ function SyncBadge({ editor, saving, savedAt, error }: { editor: Editor | null; 
 
 // ---------------- 편집기 ----------------
 
-function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSavedAt, snapshots, storage, commentAnchors }: Omit<Props, "roomId">) {
+type CarryRef = React.RefObject<(() => Record<string, unknown> | null) | null>;
+
+function CollaborativeEditor({
+  documentId,
+  title,
+  focusAt,
+  initialHtml,
+  lastSavedAt,
+  snapshots,
+  storage,
+  commentAnchors,
+  solo,
+  carryRef,
+}: Omit<DocEditorProps, "roomId"> & { carryRef: CarryRef }) {
   const router = useRouter();
+  const { selfId } = useRealtime();
+  // 실시간 연결이 안 되는 팀원이 단독 편집 중 → 끝날 때까지 보기만 (내용이 갈라지지 않도록)
+  const lockedBy = solo.lock && solo.lock.by !== selfId ? solo.lock : null;
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(lastSavedAt);
   const [error, setError] = useState<string | null>(null);
@@ -679,24 +735,7 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
 
   // 확장·속성 객체를 처음 한 번만 만들어 고정 — 매 렌더마다 새로 만들면 Tiptap 이 편집기 상태를 다시 적용하면서
   // 방금 클릭한 커서 위치를 덮어써, 다른 팀원이 입력하는 동안 클릭이 무시되는 문제가 생깁니다.
-  const [extensions] = useState(() => [
-    liveblocks,
-    StarterKit.configure({ undoRedo: false, link: { openOnClick: false, autolink: true } }),
-    // 열 경계를 끌어 너비 조절 (너비는 표 안에 저장되어 팀원에게 실시간 반영)
-    TableKit.configure({ table: { resizable: true, cellMinWidth: 48 }, tableCell: false, tableHeader: false }),
-    // 셀 색 채우기(배경색) 속성을 더한 표 칸
-    ColoredTableCell,
-    ColoredTableHeader,
-    Image,
-    Highlight,
-    TextAlign.configure({ types: ["heading", "paragraph"] }),
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    Placeholder.configure({ placeholder: "여기에 내용을 입력하세요. 팀원이 같은 문서를 열면 함께 편집됩니다." }),
-    PositionLinks,
-    ImagePasteDrop,
-    CommentMarks,
-  ]);
+  const [extensions] = useState(() => [liveblocks, ...editorExtensions({ live: true })]);
   const [editorProps] = useState(() => ({ attributes: { class: "bx-editor", "aria-label": "문서 본문", "data-testid": "editor" } }));
 
   const editor = useEditor({
@@ -714,6 +753,63 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  useEffect(() => {
+    editor?.setEditable(!lockedBy);
+  }, [editor, lockedBy]);
+
+  // 단독 편집이 끝났는지 10초마다 확인 (단독 편집하는 팀원은 실시간 방에 없어 변경 알림이 오지 않음) → 끝나면 새로고침해 반영
+  const lockHolder = lockedBy?.by ?? null;
+  useEffect(() => {
+    if (!lockHolder) return;
+    const id = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      const state = await fetchSoloState(documentId);
+      if (state && state.lock?.by !== lockHolder) router.refresh();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [lockHolder, documentId, router]);
+
+  // 실시간 연결이 끊겨 단독 편집 모드로 바뀔 때 넘길 내용 (실시간·서버에 아직 저장되지 않은 내 편집이 있을 때만)
+  useEffect(() => {
+    carryRef.current = () => {
+      const ed = editorRef.current;
+      if (!ed) return null;
+      const provider = (ed.storage as unknown as Record<string, LiveblocksStorage | undefined>).liveblocksExtension?.provider;
+      return dirty.current || provider?.getStatus() === "synchronizing" ? plainJson(ed) : null;
+    };
+    return () => {
+      carryRef.current = null;
+    };
+  }, [carryRef]);
+
+  // 단독 편집 모드에서 고친 내용을 실시간 문서에 반영 — 열 때마다 확인하고, 반영 대기 중이면 먼저 연 한 명만 가져감(서버가 정함)
+  const claiming = useRef(false);
+  const pending = solo.pending;
+  useEffect(() => {
+    if (!editor || lockedBy) return;
+    const provider = (editor.storage as unknown as Record<string, LiveblocksStorage | undefined>).liveblocksExtension?.provider;
+    if (!provider) return;
+    let done = false;
+    const run = async () => {
+      if (done || claiming.current || provider.getStatus() !== "synchronized") return;
+      done = true;
+      claiming.current = true;
+      const json = await claimSoloEdits(documentId).finally(() => (claiming.current = false));
+      if (!json || editor.isDestroyed) return;
+      if (editor.getText().trim()) {
+        await createSnapshot(documentId, { label: "단독 편집 반영 전 실시간 본문 (자동)", json: plainJson(editor), text: editor.getText() });
+      }
+      editor.commands.setContent(json);
+      setToast("단독 편집 모드에서 고친 내용을 실시간 문서에 반영했습니다. 반영 전 내용은 버전 기록에 있습니다.");
+      notifyChange("documents");
+      router.refresh();
+    };
+    void run();
+    const onStatus = () => void run();
+    provider.on("status", onStatus);
+    return () => provider.off("status", onStatus);
+  }, [editor, pending, lockedBy, documentId, router]);
 
   /** 문서 안 위치(from~to) 링크 복사 */
   const copyPositionLink = useCallback(
@@ -1041,33 +1137,17 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
         </div>
       </div>
 
-      {showVersions && (
-        <div className="card p-3" data-testid="version-panel">
-          {snapshots.length === 0 ? (
-            <p className="text-sm text-gray-500">저장된 버전이 없습니다. 30분마다 자동으로 저장되고, 「버전 저장」으로 직접 남길 수도 있습니다.</p>
-          ) : (
-            <ul className="max-h-60 divide-y divide-gray-100 overflow-y-auto">
-              {snapshots.map((s) => (
-                <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                  <span className="min-w-0">
-                    <span className="font-medium text-gray-900">{s.label}</span>
-                    <span className="ml-2 text-xs text-gray-500">
-                      {s.createdByName ?? "알 수 없음"} · {new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s.createdAt))}
-                    </span>
-                  </span>
-                  <button type="button" className="btn-ghost btn-sm shrink-0" onClick={() => restore(s)}>
-                    이 버전으로 복원
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+      {showVersions && <VersionPanel snapshots={snapshots} onRestore={lockedBy ? undefined : restore} />}
+
+      {lockedBy && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="solo-lock-banner">
+          🔒 <b>{lockedBy.name}</b>님이 <b>단독 편집 중</b>입니다(실시간 연결 문제). 끝나면 그 내용이 이 문서에 자동으로 반영되고 다시 함께 편집할 수 있어요. 지금은 보기만 할 수 있습니다.
         </div>
       )}
 
       {/* overflow-hidden 을 쓰지 않아야 도구 막대가 문서를 따라 내려옴 (sticky) */}
       <div className="rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.06)]">
-        {editor ? (
+        {editor && !lockedBy ? (
           <Toolbar
             editor={editor}
             onImage={() => imageInput.current?.click()}
@@ -1100,6 +1180,35 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
   );
 }
 
+/** 저장된 버전 목록 (onRestore 가 없으면 보기만) */
+export function VersionPanel({ snapshots, onRestore }: { snapshots: Snapshot[]; onRestore?: (snapshot: Snapshot) => void }) {
+  return (
+    <div className="card p-3" data-testid="version-panel">
+      {snapshots.length === 0 ? (
+        <p className="text-sm text-gray-500">저장된 버전이 없습니다. 30분마다 자동으로 저장되고, 「버전 저장」으로 직접 남길 수도 있습니다.</p>
+      ) : (
+        <ul className="max-h-60 divide-y divide-gray-100 overflow-y-auto">
+          {snapshots.map((s) => (
+            <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+              <span className="min-w-0">
+                <span className="font-medium text-gray-900">{s.label}</span>
+                <span className="ml-2 text-xs text-gray-500">
+                  {s.createdByName ?? "알 수 없음"} · {new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(s.createdAt))}
+                </span>
+              </span>
+              {onRestore && (
+                <button type="button" className="btn-ghost btn-sm shrink-0" onClick={() => onRestore(s)}>
+                  이 버전으로 복원
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function EditorLoading() {
   return (
     <div className="flex min-h-[50vh] items-center justify-center rounded-xl border border-gray-200 bg-white text-sm text-gray-500">
@@ -1109,22 +1218,59 @@ function EditorLoading() {
   );
 }
 
+/** 처음 연결이 이만큼 안 되면 / 쓰던 중 연결이 이만큼 끊기면 단독 편집 모드로 (보고 있는 동안만 셈) */
+const CONNECT_TIMEOUT_MS = 12_000;
+const LOST_TIMEOUT_MS = 30_000;
+
+/** 실시간 연결 감시: 무료 사용량 초과·장애·방 인원 초과 등으로 연결이 안 되면 알림 */
+function ConnectionWatch({ onFail }: { onFail: () => void }) {
+  const status = useRoomStatus();
+  const connectedOnce = useRef(false);
+  const failed = useRef(false);
+  const fail = useCallback(() => {
+    if (failed.current) return;
+    failed.current = true;
+    onFail();
+  }, [onFail]);
+
+  // 인증 실패·접속 거부(사용량 초과, 방 인원 초과 등)는 바로
+  useErrorListener((error) => {
+    if (error.context.type === "ROOM_CONNECTION_ERROR" && !connectedOnce.current) fail();
+  });
+
+  useEffect(() => {
+    if (status === "connected") {
+      connectedOnce.current = true;
+      return;
+    }
+    const limit = connectedOnce.current ? LOST_TIMEOUT_MS : CONNECT_TIMEOUT_MS;
+    let waited = 0;
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const step = now - last;
+      last = now;
+      // 다른 탭을 보는 동안(일부러 연결을 끊음)이나 절전에서 깨어난 직후는 세지 않음
+      if (document.visibilityState !== "visible" || step > 5000) return;
+      waited += step;
+      if (waited >= limit) fail();
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status, fail]);
+  return null;
+}
+
 export function LiveEditor(props: Props) {
-  const { enabled } = useRealtime();
-  if (!enabled) {
-    return (
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-        실시간 문서를 편집하려면 LIVEBLOCKS_SECRET_KEY 환경변수가 필요합니다. (README의 Liveblocks 설정 참고)
-      </div>
-    );
-  }
-  const { roomId, ...rest } = props;
+  const { roomId, onUnavailable, ...rest } = props;
+  const carryRef = useRef<(() => Record<string, unknown> | null) | null>(null);
+  const handleFail = useCallback(() => onUnavailable(carryRef.current?.() ?? null), [onUnavailable]);
   return (
     <RoomProvider id={roomId} initialPresence={EMPTY_PRESENCE}>
       {/* 코멘트·제목 등 변경을 이 문서를 보는 팀원에게 즉시 알림 */}
       <RoomChangeBridge />
+      <ConnectionWatch onFail={handleFail} />
       <ClientSideSuspense fallback={<EditorLoading />}>
-        <CollaborativeEditor {...rest} />
+        <CollaborativeEditor {...rest} carryRef={carryRef} />
       </ClientSideSuspense>
     </RoomProvider>
   );

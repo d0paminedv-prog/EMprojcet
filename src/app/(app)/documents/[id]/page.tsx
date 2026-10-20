@@ -25,9 +25,10 @@ import { DocumentEditForm, InlineTitle, MakeEditableButton, VersionUploader } fr
 import { PdfPageLink, ShareLinkButton } from "@/components/share-link";
 import { isPositionCode, parsePageNumber } from "@/lib/links";
 import { siteOrigin } from "@/lib/site";
-import { LiveEditor } from "./live-editor";
+import { DocEditor } from "./doc-editor";
 import { after } from "next/server";
 import { docRoomId } from "@/lib/liveblocks";
+import { soloInfoOf } from "@/lib/solo";
 import { figmaConfigured, refreshFigmaDocs } from "@/lib/figma";
 
 /** 코멘트를 해결한 팀원 */
@@ -242,7 +243,7 @@ export default async function DocumentPage({
           <ShareLinkButton documentId={doc.id} title={doc.title} className="shrink-0 self-start" />
         </div>
         <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start xl:gap-5">
-          <LiveEditor
+          <DocEditor
             documentId={doc.id}
             title={doc.title}
             focusAt={focusAt}
@@ -252,6 +253,7 @@ export default async function DocumentPage({
             snapshots={snapshots.map((s) => ({ id: s.id, label: s.label, createdAt: s.createdAt.toISOString(), createdByName: s.createdByName }))}
             storage={storage}
             commentAnchors={threads.filter((t) => t.anchor && !t.resolved).map((t) => ({ id: t.id, anchor: t.anchor! }))}
+            solo={await soloInfoOf(doc)}
           />
           {/* 넓은 화면: 편집기 옆에 코멘트 고정 / 좁은 화면: 편집기 아래 */}
           <aside className="mt-6 xl:sticky xl:top-4 xl:mt-0 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">{commentsCard}</aside>

@@ -72,6 +72,11 @@ export const documents = pgTable(
     initialHtml: text("initial_html"),
     lastEditedBy: uuid("last_edited_by").references(() => members.id, { onDelete: "set null" }),
     lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
+    /** 단독 편집 모드(실시간 연결이 안 될 때 한 명씩 편집): 지금 편집 권한을 가진 팀원과 만료 시각 */
+    soloBy: uuid("solo_by").references(() => members.id, { onDelete: "set null" }),
+    soloUntil: timestamp("solo_until", { withTimezone: true }),
+    /** 단독 편집한 내용이 아직 실시간 문서에 반영되지 않음 (다음에 실시간으로 연 사람이 반영) */
+    soloEditedAt: timestamp("solo_edited_at", { withTimezone: true }),
     createdBy: uuid("created_by").references(() => members.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
