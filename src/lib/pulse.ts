@@ -78,3 +78,11 @@ export async function leavePulse(memberId: string, tab: string): Promise<void> {
     .set({ goneAt: sql`now()` })
     .where(and(eq(presence.tabId, tab), eq(presence.memberId, memberId)));
 }
+
+/**
+ * 서버에서 바로 「바뀜」 표시 (창을 닫는 중이라 브라우저가 알리지 못할 때 — 예: 단독 편집 권한 반납).
+ * 이 팀원의 탭 줄에 기록하면 다른 탭들이 다음 신호 때 새로고침
+ */
+export async function markChanged(memberId: string): Promise<void> {
+  await db.update(presence).set({ changedAt: sql`now()` }).where(eq(presence.memberId, memberId));
+}

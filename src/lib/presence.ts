@@ -9,6 +9,9 @@ export const EMPTY_PRESENCE: TeamPresence = { page: null, title: null, doing: nu
 /** 5분 동안 조작이 없으면 자리 비움 */
 export const IDLE_MS = 5 * 60 * 1000;
 
+/** 단독 편집 모드(실시간 연결이 안 될 때 한 명씩 편집) 표시 — 팀원 활동(doing)에 넣어 실시간 편집 중인 팀원과 구분 */
+export const SOLO_MARK = "단독 편집";
+
 /** 팀원 활동 신호 간격 (앱 서버 /api/pulse) */
 export const PULSE_MS = 20_000;
 
