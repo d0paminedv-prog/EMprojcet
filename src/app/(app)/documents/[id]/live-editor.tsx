@@ -159,7 +159,7 @@ function ToolButton({ onClick, active, disabled, label, children }: { onClick: (
       aria-label={label}
       aria-pressed={active}
       className={cn(
-        "inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30",
+        "inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-md px-1.5 text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 disabled:opacity-30",
         active && "bg-brand-50 text-brand-700",
       )}
     >
@@ -172,11 +172,45 @@ function Sep() {
   return <span className="mx-0.5 h-5 w-px shrink-0 bg-gray-200" />;
 }
 
+const PALETTE_WIDTH = 240;
+
+// 화면 위에 붙어 있는 앱 머리글(모바일 상단 메뉴) 높이 — 편집 도구 막대를 그 바로 아래에 고정
+function appHeaderHeight(): number {
+  const header = document.querySelector<HTMLElement>("[data-app-header]");
+  return header && getComputedStyle(header).display !== "none" ? Math.round(header.getBoundingClientRect().height) : 0;
+}
+function subscribeAppHeader(onChange: () => void) {
+  const header = document.querySelector<HTMLElement>("[data-app-header]");
+  const observer = header ? new ResizeObserver(onChange) : null;
+  if (header) observer?.observe(header);
+  window.addEventListener("resize", onChange);
+  return () => {
+    observer?.disconnect();
+    window.removeEventListener("resize", onChange);
+  };
+}
+
 /** 표 셀 색 채우기 — 지금 칸 또는 끌어서 선택한 여러 칸에 배경색 */
 function CellColorPicker({ editor, current }: { editor: Editor; current: string | null }) {
   const [open, setOpen] = useState(false);
-  const [alignRight, setAlignRight] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // 팔레트를 버튼 바로 아래에 (화면 밖으로 나가지 않게)
+  const place = useCallback(() => {
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - PALETTE_WIDTH - 8)) });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    window.addEventListener("scroll", place, { passive: true, capture: true });
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, { capture: true });
+      window.removeEventListener("resize", place);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -202,14 +236,12 @@ function CellColorPicker({ editor, current }: { editor: Editor; current: string 
   const keep = (e: React.MouseEvent) => e.preventDefault();
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="relative shrink-0">
       <ToolButton
         label="셀 색 채우기"
         active={open}
         onClick={() => {
-          // 화면 오른쪽에 있으면 팔레트를 왼쪽으로 펼쳐 잘리지 않게
-          const rect = boxRef.current?.getBoundingClientRect();
-          setAlignRight(!!rect && rect.left > window.innerWidth / 2);
+          place();
           setOpen((v) => !v);
         }}
       >
@@ -220,7 +252,8 @@ function CellColorPicker({ editor, current }: { editor: Editor; current: string 
       </ToolButton>
       {open && (
         <div
-          className={cn("absolute top-full z-30 mt-1 w-60 rounded-lg border border-gray-200 bg-white p-2 shadow-lg", alignRight ? "right-0" : "left-0")}
+          className="fixed z-40 rounded-lg border border-gray-200 bg-white p-2 shadow-lg"
+          style={{ top: pos.top, left: pos.left, width: PALETTE_WIDTH }}
           role="dialog"
           aria-label="셀 색 채우기"
           data-testid="cell-color-palette"
@@ -262,7 +295,20 @@ function CellColorPicker({ editor, current }: { editor: Editor; current: string 
   );
 }
 
-function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: Editor; onImage: () => void; onCopyPositionLink: () => void; onComment: () => void }) {
+function Toolbar({
+  editor,
+  onImage,
+  onCopyPositionLink,
+  onComment,
+  stickyTop,
+}: {
+  editor: Editor;
+  onImage: () => void;
+  onCopyPositionLink: () => void;
+  onComment: () => void;
+  /** 문서를 내려도 화면 위(모바일은 상단 메뉴 아래)에 붙어 따라오는 위치 */
+  stickyTop: number;
+}) {
   const s = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -289,7 +335,13 @@ function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: E
   const chain = () => editor.chain().focus();
 
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b border-gray-200 bg-white px-2 py-1.5" role="toolbar" aria-label="서식 도구">
+    <div
+      className="sticky z-10 flex items-center gap-0.5 overflow-x-auto rounded-t-xl border-b border-gray-200 bg-white px-2 py-1.5 shadow-[0_1px_0_rgba(16,24,40,0.04)] sm:flex-wrap sm:overflow-visible"
+      style={{ top: stickyTop }}
+      role="toolbar"
+      aria-label="서식 도구"
+      data-testid="editor-toolbar"
+    >
       <ToolButton label="실행 취소" onClick={() => chain().undo().run()} disabled={!s.canUndo}>
         <Undo2 className="h-4 w-4" />
       </ToolButton>
@@ -299,7 +351,7 @@ function Toolbar({ editor, onImage, onCopyPositionLink, onComment }: { editor: E
       <Sep />
       <select
         aria-label="문단 스타일"
-        className="h-8 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-700"
+        className="h-8 shrink-0 rounded-md border border-gray-200 bg-white px-2 text-xs text-gray-700"
         value={s.block}
         onChange={(e) => {
           const v = e.target.value;
@@ -544,6 +596,24 @@ function Collaborators({ editor }: { editor: Editor | null }) {
   );
 }
 
+/** 내 편집이 서버에 모두 반영(synchronized)될 때까지 기다림 (최대 ms) */
+function waitForDocSync(editor: Editor, ms = 5000): Promise<void> {
+  const provider = (editor.storage as unknown as Record<string, LiveblocksStorage | undefined>).liveblocksExtension?.provider;
+  if (!provider || provider.getStatus() === "synchronized") return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      provider.off("status", check);
+      resolve();
+    };
+    const check = () => {
+      if (provider.getStatus() === "synchronized") done();
+    };
+    const timer = setTimeout(done, ms);
+    provider.on("status", check);
+  });
+}
+
 /** 이 문서의 Yjs 동기화 상태 (loading → synchronizing ⇄ synchronized) */
 function useDocSyncStatus(editor: Editor | null): string {
   const provider = editor ? (editor.storage as unknown as Record<string, LiveblocksStorage | undefined>).liveblocksExtension?.provider : undefined;
@@ -588,6 +658,7 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
   const imageInput = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const clearToast = useCallback(() => setToast(null), []);
+  const stickyTop = useSyncExternalStore(subscribeAppHeader, appHeaderHeight, () => 0);
 
   const liveblocks = useLiveblocksExtension({ comments: false, mentions: false });
 
@@ -888,17 +959,35 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
     editor.commands.setContent(result.json);
   }
 
-  /** 지금 내용을 저장한 뒤 Word(.docx) 또는 PDF 로 내려받기 */
+  /**
+   * 최종 버전만 내려받기: 내 편집이 서버에 다 반영될 때까지 기다린 뒤, 지금 화면의 본문(팀원 편집 포함)으로
+   * Word(.docx)·PDF 를 만듭니다. 지난 버전 기록이나 코멘트는 들어가지 않습니다.
+   */
   async function exportAs(format: "docx" | "pdf") {
-    setBusy(format === "pdf" ? "PDF 만드는 중…" : "Word 파일 만드는 중…");
-    dirty.current = true;
-    await flush();
-    setBusy(null);
-    notifyChange("documents");
-    const link = document.createElement("a");
-    link.href = `/api/documents/${documentId}/${format}`;
-    link.download = `${title.replace(/[\\/:*?"<>|]/g, "_")}.${format}`;
-    link.click();
+    const ed = editorRef.current;
+    if (!ed) return;
+    setBusy(format === "pdf" ? "최종본 PDF 만드는 중…" : "최종본 Word 파일 만드는 중…");
+    try {
+      await waitForDocSync(ed);
+      const json = plainJson(ed);
+      dirty.current = true;
+      void flush(); // 서버 사본도 같은 최종본으로 맞춤
+      const res = await fetch(`/api/documents/${documentId}/${format}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ json }) });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "파일을 만들지 못했습니다.");
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${title.replace(/[\\/:*?"<>|]/g, "_")}.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      notifyChange("documents");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "파일을 만들지 못했습니다.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
@@ -922,11 +1011,11 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
             <Save className="h-3.5 w-3.5" />
             버전 저장
           </button>
-          <button type="button" className="btn-secondary btn-sm" onClick={() => exportAs("pdf")} disabled={!editor}>
+          <button type="button" className="btn-secondary btn-sm" onClick={() => exportAs("pdf")} disabled={!editor} title="지금 화면의 최종본을 PDF로 저장 (지난 버전·코멘트 제외)">
             <FileDown className="h-3.5 w-3.5" />
             PDF로 저장
           </button>
-          <button type="button" className="btn-primary btn-sm" onClick={() => exportAs("docx")} disabled={!editor}>
+          <button type="button" className="btn-primary btn-sm" onClick={() => exportAs("docx")} disabled={!editor} title="지금 화면의 최종본을 Word 파일로 저장 (지난 버전·코멘트 제외)">
             <FileDown className="h-3.5 w-3.5" />
             Word로 내보내기
           </button>
@@ -957,27 +1046,29 @@ function CollaborativeEditor({ documentId, title, focusAt, initialHtml, lastSave
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.06)]">
+      {/* overflow-hidden 을 쓰지 않아야 도구 막대가 문서를 따라 내려옴 (sticky) */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-[0_1px_3px_rgba(16,24,40,0.06)]">
         {editor ? (
           <Toolbar
             editor={editor}
             onImage={() => imageInput.current?.click()}
             onCopyPositionLink={() => void copyPositionLink(editor.state.selection.from, editor.state.selection.to)}
             onComment={startComment}
+            stickyTop={stickyTop}
           />
         ) : (
           <div className="h-11 border-b border-gray-200" />
         )}
-        <div className="bg-gray-50/60 px-2 py-4 sm:px-6 sm:py-8">
+        <div className="rounded-b-xl bg-gray-50/60 px-2 py-4 sm:px-6 sm:py-8">
           <div className="mx-auto min-h-[60vh] max-w-[820px] bg-white px-5 py-6 shadow-sm ring-1 ring-gray-200/70 sm:px-12 sm:py-10">
             <EditorContent editor={editor} />
             {editor && (
-              <BubbleMenu editor={editor} pluginKey="bxLinkMenu" shouldShow={showLinkMenu} options={LINK_MENU_OPTIONS}>
+              <BubbleMenu editor={editor} pluginKey="bxLinkMenu" shouldShow={showLinkMenu} options={LINK_MENU_OPTIONS} className="z-30">
                 <LinkMenu editor={editor} onOpen={openLink} />
               </BubbleMenu>
             )}
             {editor && (
-              <BubbleMenu editor={editor} pluginKey="bxSelectionMenu" shouldShow={showSelectionMenu} options={SELECTION_MENU_OPTIONS}>
+              <BubbleMenu editor={editor} pluginKey="bxSelectionMenu" shouldShow={showSelectionMenu} options={SELECTION_MENU_OPTIONS} className="z-30">
                 <SelectionMenu onComment={startComment} onCopyLink={() => void copyPositionLink(editor.state.selection.from, editor.state.selection.to)} />
               </BubbleMenu>
             )}

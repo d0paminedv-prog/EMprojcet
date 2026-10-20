@@ -112,8 +112,8 @@ class Converter {
           stack: stack.length ? stack : [" "],
           ...(colSpan > 1 ? { colSpan } : {}),
           ...(rowSpan > 1 ? { rowSpan } : {}),
-          // 색 채우기 > 머리글 기본 회색
-          ...(normalizeColor(cell.attrs?.backgroundColor) || header ? { fillColor: normalizeColor(cell.attrs?.backgroundColor) ?? "#f3f4f6" } : {}),
+          // 「셀 색 채우기」로 지정한 칸만 색 (기본은 투명)
+          ...(normalizeColor(cell.attrs?.backgroundColor) ? { fillColor: normalizeColor(cell.attrs?.backgroundColor) } : {}),
           ...(header ? { bold: true } : {}),
         });
         for (let dr = 0; dr < rowSpan; dr++) {
@@ -202,7 +202,13 @@ class Converter {
   }
 }
 
-export async function tiptapToPdf(doc: PMNode | null, title: string, loadImage: ImageLoader): Promise<Buffer> {
+/** 「최종본 · 2026. 10. 20. 14:32 기준」 (한국 시간) */
+function finalStamp(at: Date): string {
+  const time = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
+  return `최종본 · ${time} 기준`;
+}
+
+export async function tiptapToPdf(doc: PMNode | null, title: string, loadImage: ImageLoader, opts: { finalAt?: Date } = {}): Promise<Buffer> {
   await ensureFonts();
   const converter = new Converter(loadImage);
   const content: Content[] = [];
@@ -215,7 +221,16 @@ export async function tiptapToPdf(doc: PMNode | null, title: string, loadImage: 
       pageSize: "A4",
       pageMargins: [MARGIN_X, 50, MARGIN_X, 56],
       content,
-      footer: (current: number, total: number) => ({ text: `${current} / ${total}`, alignment: "center", fontSize: 8, color: "#9ca3af", margin: [0, 20, 0, 0] }),
+      // 바닥글: 어느 시점의 최종본인지 + 쪽 번호
+      footer: (current: number, total: number) => ({
+        columns: [
+          { text: finalStamp(opts.finalAt ?? new Date()), alignment: "left" },
+          { text: `${current} / ${total}`, alignment: "right", width: 60 },
+        ],
+        fontSize: 8,
+        color: "#9ca3af",
+        margin: [MARGIN_X, 20, MARGIN_X, 0],
+      }),
       defaultStyle: { font: FONT, fontSize: 10.5, lineHeight: 1.35, color: "#111827" },
       styles: {
         h1: { fontSize: 18, bold: true, margin: [0, 10, 0, 6] },
